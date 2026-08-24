@@ -1,12 +1,6 @@
 #include "DialogueCamera.h"
-
 #include "Settings.h"
 
-#include <array>
-#include <atomic>
-#include <cstring>
-#include <memory>
-#include <string_view>
 
 namespace ToggleDialogueCameraSF::DialogueCamera
 {
@@ -40,7 +34,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             const bool wasThirdPerson = camera->IsInThirdPerson();
             const bool wasDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
 
-            bool targetFirstPerson = false;
+            bool targetFirstPerson;
             if (wasFirstPerson) {
                 targetFirstPerson = false;
             } else if (wasThirdPerson) {
@@ -112,7 +106,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent& a_event,
                 RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
             {
-                if (a_event.menuName != kDialogueMenuName.data()) {
+                if (a_event.menuName != kDialogueMenuName) {
                     return RE::BSEventNotifyControl::kContinue;
                 }
 

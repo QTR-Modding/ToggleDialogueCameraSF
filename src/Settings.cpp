@@ -1,5 +1,4 @@
 #include "Settings.h"
-
 #include <Windows.h>
 
 namespace ToggleDialogueCameraSF::Settings
