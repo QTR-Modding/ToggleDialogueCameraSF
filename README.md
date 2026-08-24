@@ -2,7 +2,7 @@
 
 An SFSE port of Toggle Dialogue Camera for Starfield.
 
-During dialogue, press `F` or Right Stick Click to switch views. When Starfield's Dialogue Camera setting is enabled, the mod switches between the dialogue camera and third person. When Dialogue Camera is disabled, it switches between first and third person. Both bindings can be changed in `Data\\SFSE\\Plugins\\ToggleDialogueCameraSF.ini`. Set `bAutoToggle=1` to enter first person when dialogue opens and return to third person when it closes.
+During dialogue, use Starfield's Toggle POV input (`F`, mouse wheel, or Right Stick Click by default) to switch views. When Starfield's Dialogue Camera setting is enabled, the mod switches between the dialogue camera and third person. When Dialogue Camera is disabled, it switches between first and third person. The keyboard and gamepad fallbacks can be changed in `Data\\SFSE\\Plugins\\ToggleDialogueCameraSF.ini`. Set `bAutoToggle=1` to enter first person when dialogue opens and return to third person when it closes.
 
 ## Requirements
 
@@ -17,10 +17,10 @@ Copy `ToggleDialogueCameraSF.dll` and `ToggleDialogueCameraSF.ini` into `Data\\S
 ## Testing
 
 1. Start a dialogue and confirm the log reports `DialogueMenu opened`.
-2. With Dialogue Camera enabled, press `F` or Right Stick Click repeatedly and confirm Dialogue Camera ↔ Third Person.
+2. With Dialogue Camera enabled, test `F`, mouse wheel, and Right Stick Click and confirm Dialogue Camera ↔ Third Person without closing dialogue.
 3. Disable Dialogue Camera in Starfield's Accessibility settings, start another dialogue, and confirm First Person ↔ Third Person.
 4. End the dialogue and confirm movement and camera-look controls work immediately without reloading.
-5. Confirm the log contains exactly one `Dialogue toggle received` line for each physical `F` or Right Stick Click.
+5. Confirm the log contains exactly one `TogglePOV input received` and one `Dialogue toggle received` line per input.
 6. Optionally set `bAutoToggle=1` and verify automatic first-person entry and third-person exit.
 
 The SFSE log is written to `Documents\\My Games\\Starfield\\SFSE\\ToggleDialogueCameraSF.log`.
