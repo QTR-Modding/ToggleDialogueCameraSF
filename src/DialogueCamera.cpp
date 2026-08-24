@@ -20,6 +20,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         std::atomic_bool dialogueOpen{ false };
         std::atomic_bool dialogueCameraEnabled{ false };
         std::atomic_bool installAttempted{ false };
+        std::atomic_bool inputOverflowReported{ false };
         InputProcessor originalInputProcessor{ nullptr };
 
         void ToggleCamera()
@@ -36,12 +37,15 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
             const bool useDialogueCamera = dialogueCameraEnabled.load();
             std::string_view target;
-            if (wasDialogueCamera || wasFirstPerson) {
-                camera->ForceThirdPerson();
+            if (useDialogueCamera && wasDialogueCamera) {
+                RE::Game::StopDialogueCamera();
                 target = "third person";
             } else if (useDialogueCamera) {
-                camera->SetCameraState(RE::CameraState::kDialogue);
+                RE::Game::StartDialogueCameraOrCenterOnTarget();
                 target = "dialogue camera";
+            } else if (wasFirstPerson) {
+                camera->ForceThirdPerson();
+                target = "third person";
             } else {
                 camera->ForceFirstPerson();
                 target = "first person";
@@ -56,39 +60,72 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                 target);
         }
 
-        [[nodiscard]] bool IsToggleRelease(const RE::InputEvent& a_event)
+        [[nodiscard]] bool IsToggleButton(const RE::ButtonEvent& a_button)
         {
-            if (a_event.eventType != RE::InputEvent::EventType::kButton) {
-                return false;
-            }
-
-            const auto& button = static_cast<const RE::ButtonEvent&>(a_event);
-            if (button.value != 0.0F || button.heldDownSecs == 0.0F) {
-                return false;
-            }
-
             const auto& config = Settings::Get();
-            if (a_event.deviceType == RE::InputEvent::DeviceType::kKeyboard) {
-                return config.keyboardToggleKey >= 0 && button.idCode == config.keyboardToggleKey;
+            if (a_button.deviceType == RE::InputEvent::DeviceType::kKeyboard) {
+                return config.keyboardToggleKey >= 0 && a_button.idCode == config.keyboardToggleKey;
             }
-            if (a_event.deviceType == RE::InputEvent::DeviceType::kGamepad) {
-                return config.gamepadToggleKey >= 0 && button.idCode == config.gamepadToggleKey;
+            if (a_button.deviceType == RE::InputEvent::DeviceType::kGamepad) {
+                return config.gamepadToggleKey >= 0 && a_button.idCode == config.gamepadToggleKey;
             }
             return false;
         }
 
         void ProcessInput(RE::BSInputEventReceiver* a_receiver, const RE::InputEvent* a_events)
         {
-            originalInputProcessor(a_receiver, a_events);
             if (!dialogueOpen.load() || !a_events) {
+                originalInputProcessor(a_receiver, a_events);
                 return;
             }
 
+            struct SuppressedEvent
+            {
+                RE::ButtonEvent* event;
+                RE::InputEvent::Status previousStatus;
+            };
+
+            constexpr std::size_t kMaximumToggleEvents = 8;
+            std::array<SuppressedEvent, kMaximumToggleEvents> suppressedEvents{};
+            std::size_t suppressedEventCount = 0;
+            bool toggleReleased = false;
+
             for (auto* event = a_events; event; event = event->next) {
-                if (IsToggleRelease(*event)) {
-                    ToggleCamera();
-                    break;
+                if (event->eventType != RE::InputEvent::EventType::kButton) {
+                    continue;
                 }
+
+                auto& button = const_cast<RE::ButtonEvent&>(static_cast<const RE::ButtonEvent&>(*event));
+                if (!IsToggleButton(button)) {
+                    continue;
+                }
+                if (button.status == RE::InputEvent::Status::kStop) {
+                    continue;
+                }
+
+                toggleReleased = toggleReleased || (button.value == 0.0F && button.heldDownSecs > 0.0F);
+                if (suppressedEventCount == suppressedEvents.size()) {
+                    for (std::size_t i = 0; i < suppressedEventCount; ++i) {
+                        suppressedEvents[i].event->status = suppressedEvents[i].previousStatus;
+                    }
+                    if (!inputOverflowReported.exchange(true)) {
+                        logger::error("Toggle input queue exceeded the suppression capacity; passing the queue through unchanged.");
+                    }
+                    originalInputProcessor(a_receiver, a_events);
+                    return;
+                }
+
+                suppressedEvents[suppressedEventCount++] = { std::addressof(button), button.status };
+                button.status = RE::InputEvent::Status::kStop;
+            }
+
+            originalInputProcessor(a_receiver, a_events);
+            for (std::size_t i = 0; i < suppressedEventCount; ++i) {
+                suppressedEvents[i].event->status = suppressedEvents[i].previousStatus;
+            }
+
+            if (toggleReleased) {
+                ToggleCamera();
             }
         }
 
@@ -132,7 +169,11 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                         Settings::Get().autoToggle);
 
                     if (Settings::Get().autoToggle && !isFirstPerson) {
-                        camera->ForceFirstPerson();
+                        if (isDialogueCamera) {
+                            RE::Game::StopDialogueCamera(false, true);
+                        } else {
+                            camera->ForceFirstPerson();
+                        }
                     }
                 } else {
                     logger::info(
