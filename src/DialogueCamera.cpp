@@ -2,10 +2,6 @@
 #include "Input.h"
 #include "Settings.h"
 
-#include <atomic>
-#include <string_view>
-#include <utility>
-
 namespace ToggleDialogueCameraSF::DialogueCamera
 {
     namespace
@@ -423,7 +419,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         const bool wasThirdPerson = camera->IsInThirdPerson();
         const bool wasDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
         const bool nativeDialogueCameraEnabled = dialogueCameraEnabledAtOpen.load();
-        const char* target = "unchanged";
+        const char* target;
 
         if (nativeDialogueCameraEnabled) {
             if (wasDialogueCamera) {
@@ -439,12 +435,48 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                 }
                 target = "third person";
             } else if (wasThirdPerson) {
+                auto const player = RE::PlayerCharacter::GetSingleton();
+                if (!player) {
+                    logger::error("Third-person-to-dialogue toggle failed because PlayerCharacter is unavailable.");
+                    return;
+                }
+                const bool ownedDialogueCameraOverride = dialogueCameraOverrideActive.load();
                 if (!RestoreDialogueCameraSetting("manual third-person-to-dialogue toggle")) {
                     return;
                 }
 
-                // The active dialogue watchdog performs the full target-aware entry next update.
-                target = "dialogue camera via vanilla re-entry";
+                const bool started = player->StartDialogueCamera(false);
+                const bool enteredDialogue = camera->QCameraEquals(RE::CameraState::kDialogue);
+                if (!enteredDialogue) {
+                    logger::error(
+                        "Third-person-to-dialogue toggle failed: engine start returned {}, camera={}.",
+                        started,
+                        CameraStateName(*camera));
+
+                    const bool suppressionRestored =
+                        !ownedDialogueCameraOverride ||
+                        SuppressDialogueCamera("failed third-person-to-dialogue toggle");
+                    if (ownedDialogueCameraOverride && suppressionRestored && !camera->IsInThirdPerson()) {
+                        camera->SetCameraState(RE::CameraState::kThirdPerson);
+                    }
+
+                    if (!suppressionRestored) {
+                        logger::critical(
+                            "Failed dialogue re-entry could not reacquire the runtime Dialogue Camera override.");
+                    }
+                    if (ownedDialogueCameraOverride && suppressionRestored && !camera->IsInThirdPerson()) {
+                        logger::critical(
+                            "Failed dialogue re-entry also left the camera in {}.",
+                            CameraStateName(*camera));
+                    }
+                    return;
+                }
+
+                if (!started) {
+                    logger::warn(
+                        "Dialogue camera reached the requested state although the engine start call returned false.");
+                }
+                target = "dialogue camera";
             } else {
                 if (!SuppressDialogueCamera("manual first/other-to-third-person toggle")) {
                     return;

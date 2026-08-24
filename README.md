@@ -20,7 +20,7 @@ Copy `ToggleDialogueCameraSF.dll` and `ToggleDialogueCameraSF.ini` into `Data\\S
 2. With Dialogue Camera enabled, test `F`, mouse wheel, and Right Stick Click and confirm Dialogue Camera ↔ Third Person without closing dialogue.
 3. Disable Dialogue Camera in Starfield's Accessibility settings, start another dialogue, and confirm First Person ↔ Third Person.
 4. End the dialogue from both the dialogue-camera and third-person views. Confirm movement and camera-look work, then immediately activate the same NPC again.
-5. Confirm each press logs one `Toggle input accepted` line and one `Dialogue toggle` line.
+5. Confirm each deliberate press or wheel gesture logs one `Toggle input accepted` line and one `Dialogue toggle` line.
 6. Optionally set `bAutoToggle=1` and verify automatic first-person entry and third-person exit.
 
 The SFSE log is written to `Documents\\My Games\\Starfield\\SFSE\\Logs\\Toggle Dialogue Camera SF.log`.
