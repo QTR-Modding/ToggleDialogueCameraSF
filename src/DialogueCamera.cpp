@@ -24,23 +24,44 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         using InputProcessor = void (*)(RE::BSInputEventReceiver*, const RE::InputEvent*);
 
         std::atomic_bool dialogueOpen{ false };
-        std::atomic_bool forcedFirstPerson{ false };
+        std::atomic_bool dialogueFirstPerson{ false };
+        std::atomic_bool installAttempted{ false };
         InputProcessor originalInputProcessor{ nullptr };
 
         void ToggleCamera()
         {
             auto* const camera = RE::PlayerCamera::GetSingleton();
             if (!camera) {
+                logger::warn("Toggle input received, but PlayerCamera is unavailable.");
                 return;
             }
 
-            if (forcedFirstPerson.load()) {
-                camera->ForceThirdPerson();
-                forcedFirstPerson.store(false);
+            const bool wasFirstPerson = camera->IsInFirstPerson();
+            const bool wasThirdPerson = camera->IsInThirdPerson();
+            const bool wasDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
+
+            bool targetFirstPerson = false;
+            if (wasFirstPerson) {
+                targetFirstPerson = false;
+            } else if (wasThirdPerson) {
+                targetFirstPerson = true;
             } else {
-                camera->ForceFirstPerson();
-                forcedFirstPerson.store(true);
+                targetFirstPerson = !dialogueFirstPerson.load();
             }
+
+            if (targetFirstPerson) {
+                camera->ForceFirstPerson();
+            } else {
+                camera->ForceThirdPerson();
+            }
+            dialogueFirstPerson.store(targetFirstPerson);
+
+            logger::info(
+                "Dialogue toggle received: first={}, third={}, dialogue={}, target={}.",
+                wasFirstPerson,
+                wasThirdPerson,
+                wasDialogueCamera,
+                targetFirstPerson ? "first person" : "third person");
         }
 
         [[nodiscard]] bool IsToggleRelease(const RE::InputEvent& a_event)
@@ -96,23 +117,41 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                 }
 
                 dialogueOpen.store(a_event.opening);
-                if (!Settings::Get().autoToggle) {
-                    return RE::BSEventNotifyControl::kContinue;
-                }
 
                 auto* const camera = RE::PlayerCamera::GetSingleton();
                 if (!camera) {
+                    dialogueFirstPerson.store(false);
+                    logger::warn("DialogueMenu {} but PlayerCamera is unavailable.", a_event.opening ? "opened" : "closed");
                     return RE::BSEventNotifyControl::kContinue;
                 }
 
                 if (a_event.opening) {
-                    if (!camera->IsInFirstPerson()) {
+                    const bool isFirstPerson = camera->IsInFirstPerson();
+                    const bool isThirdPerson = camera->IsInThirdPerson();
+                    const bool isDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
+                    dialogueFirstPerson.store(isFirstPerson);
+
+                    logger::info(
+                        "DialogueMenu opened: first={}, third={}, dialogue={}, auto={}.",
+                        isFirstPerson,
+                        isThirdPerson,
+                        isDialogueCamera,
+                        Settings::Get().autoToggle);
+
+                    if (Settings::Get().autoToggle && !isFirstPerson) {
                         camera->ForceFirstPerson();
-                        forcedFirstPerson.store(true);
+                        dialogueFirstPerson.store(true);
                     }
-                } else if (camera->IsInFirstPerson()) {
-                    camera->ForceThirdPerson();
-                    forcedFirstPerson.store(false);
+                } else {
+                    logger::info(
+                        "DialogueMenu closed: tracked first person={}, auto={}.",
+                        dialogueFirstPerson.load(),
+                        Settings::Get().autoToggle);
+
+                    if (Settings::Get().autoToggle && dialogueFirstPerson.load()) {
+                        camera->ForceThirdPerson();
+                    }
+                    dialogueFirstPerson.store(false);
                 }
                 return RE::BSEventNotifyControl::kContinue;
             }
@@ -121,6 +160,11 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
     bool Install()
     {
+        if (installAttempted.exchange(true)) {
+            logger::error("Installation was requested more than once.");
+            return false;
+        }
+
         Settings::Load();
 
         auto* const ui = RE::UI::GetSingleton();
