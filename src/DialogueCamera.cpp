@@ -18,7 +18,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         using InputProcessor = void (*)(RE::BSInputEventReceiver*, const RE::InputEvent*);
 
         std::atomic_bool dialogueOpen{ false };
-        std::atomic_bool dialogueFirstPerson{ false };
+        std::atomic_bool dialogueCameraEnabled{ false };
         std::atomic_bool installAttempted{ false };
         InputProcessor originalInputProcessor{ nullptr };
 
@@ -34,28 +34,26 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             const bool wasThirdPerson = camera->IsInThirdPerson();
             const bool wasDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
 
-            bool targetFirstPerson;
-            if (wasFirstPerson) {
-                targetFirstPerson = false;
-            } else if (wasThirdPerson) {
-                targetFirstPerson = true;
-            } else {
-                targetFirstPerson = !dialogueFirstPerson.load();
-            }
-
-            if (targetFirstPerson) {
-                camera->ForceFirstPerson();
-            } else {
+            const bool useDialogueCamera = dialogueCameraEnabled.load();
+            std::string_view target;
+            if (wasDialogueCamera || wasFirstPerson) {
                 camera->ForceThirdPerson();
+                target = "third person";
+            } else if (useDialogueCamera) {
+                camera->SetCameraState(RE::CameraState::kDialogue);
+                target = "dialogue camera";
+            } else {
+                camera->ForceFirstPerson();
+                target = "first person";
             }
-            dialogueFirstPerson.store(targetFirstPerson);
 
             logger::info(
-                "Dialogue toggle received: first={}, third={}, dialogue={}, target={}.",
+                "Dialogue toggle received: first={}, third={}, dialogue={}, dialogue camera enabled={}, target={}.",
                 wasFirstPerson,
                 wasThirdPerson,
                 wasDialogueCamera,
-                targetFirstPerson ? "first person" : "third person");
+                useDialogueCamera,
+                target);
         }
 
         [[nodiscard]] bool IsToggleRelease(const RE::InputEvent& a_event)
@@ -114,7 +112,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
                 auto* const camera = RE::PlayerCamera::GetSingleton();
                 if (!camera) {
-                    dialogueFirstPerson.store(false);
+                    dialogueCameraEnabled.store(false);
                     logger::warn("DialogueMenu {} but PlayerCamera is unavailable.", a_event.opening ? "opened" : "closed");
                     return RE::BSEventNotifyControl::kContinue;
                 }
@@ -123,29 +121,29 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                     const bool isFirstPerson = camera->IsInFirstPerson();
                     const bool isThirdPerson = camera->IsInThirdPerson();
                     const bool isDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
-                    dialogueFirstPerson.store(isFirstPerson);
+                    dialogueCameraEnabled.store(isDialogueCamera);
 
                     logger::info(
-                        "DialogueMenu opened: first={}, third={}, dialogue={}, auto={}.",
+                        "DialogueMenu opened: first={}, third={}, dialogue={}, dialogue camera enabled={}, auto={}.",
                         isFirstPerson,
                         isThirdPerson,
                         isDialogueCamera,
+                        dialogueCameraEnabled.load(),
                         Settings::Get().autoToggle);
 
                     if (Settings::Get().autoToggle && !isFirstPerson) {
                         camera->ForceFirstPerson();
-                        dialogueFirstPerson.store(true);
                     }
                 } else {
                     logger::info(
-                        "DialogueMenu closed: tracked first person={}, auto={}.",
-                        dialogueFirstPerson.load(),
+                        "DialogueMenu closed: dialogue camera enabled={}, auto={}.",
+                        dialogueCameraEnabled.load(),
                         Settings::Get().autoToggle);
 
-                    if (Settings::Get().autoToggle && dialogueFirstPerson.load()) {
+                    if (Settings::Get().autoToggle) {
                         camera->ForceThirdPerson();
                     }
-                    dialogueFirstPerson.store(false);
+                    dialogueCameraEnabled.store(false);
                 }
                 return RE::BSEventNotifyControl::kContinue;
             }

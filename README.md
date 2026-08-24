@@ -2,7 +2,7 @@
 
 An SFSE port of Toggle Dialogue Camera for Starfield.
 
-During dialogue, press `F` or Right Stick Click to switch between first- and third-person views. Both bindings can be changed in `Data\\SFSE\\Plugins\\ToggleDialogueCameraSF.ini`. Set `bAutoToggle=1` to enter first person when dialogue opens and return to third person when it closes.
+During dialogue, press `F` or Right Stick Click to switch views. When Starfield's Dialogue Camera setting is enabled, the mod switches between the dialogue camera and third person. When Dialogue Camera is disabled, it switches between first and third person. Both bindings can be changed in `Data\\SFSE\\Plugins\\ToggleDialogueCameraSF.ini`. Set `bAutoToggle=1` to enter first person when dialogue opens and return to third person when it closes.
 
 ## Requirements
 
@@ -17,12 +17,13 @@ Copy `ToggleDialogueCameraSF.dll` and `ToggleDialogueCameraSF.ini` into `Data\\S
 ## Testing
 
 1. Start a dialogue and confirm the log reports `DialogueMenu opened`.
-2. Press `F` or Right Stick Click once to request first person and again to request third person.
-3. End the dialogue and confirm the log reports `DialogueMenu closed`.
-4. Optionally set `bAutoToggle=1` and verify automatic first-person entry and third-person exit.
+2. With Dialogue Camera enabled, press `F` or Right Stick Click repeatedly and confirm Dialogue Camera ↔ Third Person.
+3. Disable Dialogue Camera in Starfield's Accessibility settings, start another dialogue, and confirm First Person ↔ Third Person.
+4. End the dialogue and confirm the log reports `DialogueMenu closed`.
+5. Optionally set `bAutoToggle=1` and verify automatic first-person entry and third-person exit.
 
 The SFSE log is written to `Documents\\My Games\\Starfield\\SFSE\\ToggleDialogueCameraSF.log`.
 
 ## Current scope
 
-This test candidate implements the dialogue-only POV toggle and optional automatic entry/exit behavior. The Skyrim version's direct third-person zoom manipulation and gradual zoom transition remain excluded until their Starfield camera-state layout is separately verified.
+This test candidate adapts the dialogue-only toggle to Starfield's optional dialogue-camera state and supports optional automatic entry/exit behavior. The Skyrim version's direct third-person zoom manipulation and gradual zoom transition remain excluded until their Starfield camera-state layout is separately verified.
