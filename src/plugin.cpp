@@ -35,7 +35,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
         return false;
     }
 
-    const auto* const messaging = SFSE::GetMessagingInterface();
+    const auto const messaging = SFSE::GetMessagingInterface();
     if (!messaging) {
         logger::critical("Required SFSE MessagingInterface is unavailable.");
         return false;

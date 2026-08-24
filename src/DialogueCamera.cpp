@@ -28,7 +28,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
         void ToggleCamera()
         {
-            auto* const camera = RE::PlayerCamera::GetSingleton();
+            auto const camera = RE::PlayerCamera::GetSingleton();
             if (!camera) {
                 logger::warn("Toggle input received, but PlayerCamera is unavailable.");
                 return;
@@ -123,7 +123,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
                 dialogueOpen.store(a_event.opening);
 
-                auto* const camera = RE::PlayerCamera::GetSingleton();
+                auto const camera = RE::PlayerCamera::GetSingleton();
                 if (!camera) {
                     dialogueCameraEnabled.store(false);
                     logger::warn("DialogueMenu {} but PlayerCamera is unavailable.", a_event.opening ? "opened" : "closed");
@@ -161,7 +161,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                         camera->ForceThirdPerson();
                     }
                     if (controlsRestoreRequired.exchange(false)) {
-                        if (auto* const player = RE::PlayerCharacter::GetSingleton()) {
+                        if (auto const player = RE::PlayerCharacter::GetSingleton()) {
                             player->SetControlsDriven(true);
                             logger::info("Restored player controls after leaving the dialogue camera state.");
                         } else {
@@ -184,7 +184,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
         Settings::Load();
 
-        auto* const ui = RE::UI::GetSingleton();
+        auto const ui = RE::UI::GetSingleton();
         if (!ui) {
             logger::error("UI singleton is unavailable.");
             return false;
