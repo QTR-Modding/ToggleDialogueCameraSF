@@ -1,109 +1,276 @@
 #include "DialogueCamera.h"
+#include "Input.h"
 #include "Settings.h"
 
+#include <atomic>
+#include <string_view>
+#include <utility>
 
 namespace ToggleDialogueCameraSF::DialogueCamera
 {
     namespace
     {
         constexpr std::string_view kDialogueMenuName{ "DialogueMenu" };
-        constexpr std::string_view kTogglePOVEvent{ "TogglePOV" };
-        constexpr std::int32_t kMouseWheelUp{ 8 };
-        constexpr std::int32_t kMouseWheelDown{ 9 };
+        constexpr std::string_view kMainMenuName{ "MainMenu" };
+        constexpr std::string_view kPauseMenuName{ "PauseMenu" };
+        constexpr std::string_view kDialogueCameraSettingName{ "bDialogueEnable:Interface" };
 
-        // DialogueMenu's BSInputEventUser subobject for Starfield 1.16.244.
-        constexpr std::size_t kDialogueMenuInputVtable = 1;
-        constexpr std::size_t kOnButtonEventSlot = 8;
-        constexpr std::array<std::uint8_t, 16> kExpectedButtonHandlerPrologue{
-            0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57
+        enum class ResumeView : std::uint8_t
+        {
+            kNone,
+            kFirstPerson,
+            kThirdPerson
         };
 
-        using ButtonHandler = void (*)(RE::BSInputEventUser*, const RE::ButtonEvent*);
-
         std::atomic_bool dialogueOpen{ false };
-        std::atomic_bool dialogueCameraEnabled{ false };
-        std::atomic_bool controlsRestoreRequired{ false };
+        std::atomic_bool pauseMenuOpen{ false };
+        std::atomic_bool dialogueCameraEnabledAtOpen{ false };
+        std::atomic_bool dialogueCameraOverrideActive{ false };
+        std::atomic<ResumeView> resumeAfterSave{ ResumeView::kNone };
+        std::atomic<ResumeView> resumeAfterPause{ ResumeView::kNone };
         std::atomic_bool installAttempted{ false };
-        ButtonHandler originalButtonHandler{ nullptr };
+        RE::Setting* dialogueCameraSetting{ nullptr };
 
-        void ToggleCamera()
+        [[nodiscard]] const char* CameraStateName(const RE::PlayerCamera& a_camera)
         {
-            auto const camera = RE::PlayerCamera::GetSingleton();
-            if (!camera) {
-                logger::warn("Toggle input received, but PlayerCamera is unavailable.");
-                return;
+            if (a_camera.IsInFirstPerson()) {
+                return "first person";
             }
-
-            const bool wasFirstPerson = camera->IsInFirstPerson();
-            const bool wasThirdPerson = camera->IsInThirdPerson();
-            const bool wasDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
-
-            const bool useDialogueCamera = dialogueCameraEnabled.load();
-            std::string_view target;
-            if (useDialogueCamera && wasDialogueCamera) {
-                camera->ForceThirdPerson();
-                controlsRestoreRequired.store(true);
-                target = "third person";
-            } else if (useDialogueCamera) {
-                camera->SetCameraState(RE::CameraState::kDialogue);
-                controlsRestoreRequired.store(false);
-                target = "dialogue camera";
-            } else if (wasFirstPerson) {
-                camera->ForceThirdPerson();
-                target = "third person";
-            } else {
-                camera->ForceFirstPerson();
-                target = "first person";
+            if (a_camera.IsInThirdPerson()) {
+                return "third person";
             }
-
-            logger::info(
-                "Dialogue toggle received: first={}, third={}, dialogue={}, dialogue camera enabled={}, target={}.",
-                wasFirstPerson,
-                wasThirdPerson,
-                wasDialogueCamera,
-                useDialogueCamera,
-                target);
+            if (a_camera.QCameraEquals(RE::CameraState::kDialogue)) {
+                return "dialogue";
+            }
+            return "other";
         }
 
-        [[nodiscard]] bool IsToggleInput(const RE::ButtonEvent& a_button)
+        [[nodiscard]] bool SetRuntimeDialogueCamera(const bool a_enabled)
         {
-            if (a_button.QUserEvent() == kTogglePOVEvent) {
+            if (!dialogueCameraSetting || !dialogueCameraSetting->Is<bool>()) {
+                logger::error("The runtime Dialogue Camera setting is unavailable.");
+                return false;
+            }
+
+            dialogueCameraSetting->SetBool(a_enabled);
+            if (dialogueCameraSetting->GetBool() != a_enabled) {
+                logger::error("Could not set the runtime Dialogue Camera gate to {}.", a_enabled);
+                return false;
+            }
+            return true;
+        }
+
+        [[nodiscard]] bool RestoreDialogueCameraSetting(const std::string_view a_reason)
+        {
+            if (!dialogueCameraOverrideActive.load()) {
                 return true;
             }
 
-            const auto& config = Settings::Get();
-            if (a_button.deviceType == RE::InputEvent::DeviceType::kKeyboard) {
-                return config.keyboardToggleKey >= 0 && a_button.idCode == config.keyboardToggleKey;
+            const bool originalValue = dialogueCameraEnabledAtOpen.load();
+            if (!SetRuntimeDialogueCamera(originalValue)) {
+                logger::critical(
+                    "Could not restore the runtime Dialogue Camera gate to {} during {}.",
+                    originalValue,
+                    a_reason);
+                return false;
             }
-            if (a_button.deviceType == RE::InputEvent::DeviceType::kMouse) {
-                return a_button.idCode == kMouseWheelUp || a_button.idCode == kMouseWheelDown;
-            }
-            if (a_button.deviceType == RE::InputEvent::DeviceType::kGamepad) {
-                return config.gamepadToggleKey >= 0 && a_button.idCode == config.gamepadToggleKey;
-            }
-            return false;
+
+            dialogueCameraOverrideActive.store(false);
+            logger::info(
+                "Restored the runtime Dialogue Camera gate to {} during {}.",
+                originalValue,
+                a_reason);
+            return true;
         }
 
-        void ProcessButton(RE::BSInputEventUser* a_receiver, const RE::ButtonEvent* a_button)
+        [[nodiscard]] bool SuppressDialogueCamera(const std::string_view a_reason)
         {
-            if (!dialogueOpen.load() || !a_button || !IsToggleInput(*a_button)) {
-                originalButtonHandler(a_receiver, a_button);
-                return;
+            if (dialogueCameraOverrideActive.load()) {
+                return true;
+            }
+            if (!SetRuntimeDialogueCamera(false)) {
+                logger::error("Could not suppress the runtime Dialogue Camera gate during {}.", a_reason);
+                return false;
             }
 
-            if (a_button->status == RE::InputEvent::Status::kStop) {
-                return;
-            }
-
-            if (a_button->value != 0.0F && a_button->heldDownSecs == 0.0F) {
-                logger::info(
-                    "TogglePOV input received: device={}, id={}, event={}.",
-                    std::to_underlying(a_button->deviceType),
-                    a_button->idCode,
-                    a_button->QUserEvent().c_str());
-                ToggleCamera();
-            }
+            dialogueCameraOverrideActive.store(true);
+            logger::info("Suppressed the runtime Dialogue Camera gate during {}.", a_reason);
+            return true;
         }
+
+        [[nodiscard]] bool SelectThirdPerson(RE::PlayerCamera& a_camera, const bool a_fromDialogue)
+        {
+            if (a_fromDialogue) {
+                // Generic state selection invokes Starfield's full dialogue-camera stop path.
+                a_camera.SetCameraState(RE::CameraState::kThirdPerson);
+            } else {
+                a_camera.ForceThirdPerson();
+            }
+            return a_camera.IsInThirdPerson();
+        }
+
+        [[nodiscard]] bool SelectFirstPerson(RE::PlayerCamera& a_camera, const bool a_fromDialogue)
+        {
+            if (a_fromDialogue) {
+                a_camera.SetCameraState(RE::CameraState::kFirstPerson);
+            } else {
+                a_camera.ForceFirstPerson();
+            }
+            return a_camera.IsInFirstPerson();
+        }
+
+        void EnterAutomaticFirstPerson(RE::PlayerCamera& a_camera)
+        {
+            const bool fromDialogue = a_camera.QCameraEquals(RE::CameraState::kDialogue);
+            if (dialogueCameraEnabledAtOpen.load() && !SuppressDialogueCamera("automatic dialogue entry")) {
+                logger::error("Automatic first-person entry was cancelled because dialogue-camera suppression failed.");
+                return;
+            }
+
+            if (!a_camera.IsInFirstPerson() && !SelectFirstPerson(a_camera, fromDialogue)) {
+                logger::error("Automatic first-person entry failed; camera remained {}.", CameraStateName(a_camera));
+                if (!RestoreDialogueCameraSetting("failed automatic dialogue entry")) {
+                    logger::critical("Automatic entry failure also left the runtime setting unrestored.");
+                }
+                return;
+            }
+
+            logger::info(
+                "Automatic dialogue entry selected {}; runtime gate={}.",
+                CameraStateName(a_camera),
+                dialogueCameraSetting->GetBool());
+        }
+
+        void ExitAutomaticFirstPerson(RE::PlayerCamera& a_camera)
+        {
+            const bool fromDialogue = a_camera.QCameraEquals(RE::CameraState::kDialogue);
+            if (fromDialogue && dialogueCameraEnabledAtOpen.load() &&
+                !SuppressDialogueCamera("automatic dialogue exit")) {
+                logger::error("Automatic third-person exit was cancelled because dialogue-camera suppression failed.");
+                return;
+            }
+
+            if (!a_camera.IsInThirdPerson() && !SelectThirdPerson(a_camera, fromDialogue)) {
+                logger::error("Automatic third-person exit failed; camera remained {}.", CameraStateName(a_camera));
+                return;
+            }
+
+            logger::info("Automatic dialogue exit selected {}.", CameraStateName(a_camera));
+        }
+
+        [[nodiscard]] bool IsNonTerminalSave(const RE::SaveLoadEvent::OpType a_operation)
+        {
+            using OpType = RE::SaveLoadEvent::OpType;
+            return a_operation == OpType::kAutosave ||
+                   a_operation == OpType::kQuicksave ||
+                   a_operation == OpType::kManualSave;
+        }
+
+        [[nodiscard]] ResumeView CaptureResumeView(const RE::PlayerCamera* a_camera)
+        {
+            if (!a_camera) {
+                return ResumeView::kNone;
+            }
+            if (a_camera->IsInFirstPerson()) {
+                return ResumeView::kFirstPerson;
+            }
+            if (a_camera->IsInThirdPerson()) {
+                return ResumeView::kThirdPerson;
+            }
+            return ResumeView::kNone;
+        }
+
+        void ResumeDialogueView(const ResumeView a_view, const std::string_view a_reason)
+        {
+            if (a_view == ResumeView::kNone || !dialogueOpen.load()) {
+                return;
+            }
+
+            auto const camera = RE::PlayerCamera::GetSingleton();
+            if (!camera) {
+                logger::error("Could not resume the dialogue view during {} because PlayerCamera is unavailable.", a_reason);
+                return;
+            }
+            if (dialogueCameraEnabledAtOpen.load() && !SuppressDialogueCamera(a_reason)) {
+                return;
+            }
+
+            const bool fromDialogue = camera->QCameraEquals(RE::CameraState::kDialogue);
+            const bool selected =
+                a_view == ResumeView::kFirstPerson ?
+                    (camera->IsInFirstPerson() || SelectFirstPerson(*camera, fromDialogue)) :
+                    (camera->IsInThirdPerson() || SelectThirdPerson(*camera, fromDialogue));
+            if (!selected) {
+                logger::error(
+                    "Could not resume the dialogue view during {}; camera remained {}.",
+                    a_reason,
+                    CameraStateName(*camera));
+                if (!RestoreDialogueCameraSetting("failed suspended-view restoration")) {
+                    logger::critical("Suspended-view failure also left the runtime setting unrestored.");
+                }
+                return;
+            }
+
+            logger::info("Resumed the {} dialogue view during {}.", CameraStateName(*camera), a_reason);
+        }
+
+        class SaveLoadSink final : public RE::BSTEventSink<RE::SaveLoadEvent>
+        {
+        public:
+            static SaveLoadSink* GetSingleton()
+            {
+                static SaveLoadSink singleton;
+                return &singleton;
+            }
+
+            RE::BSEventNotifyControl ProcessEvent(
+                const RE::SaveLoadEvent& a_event,
+                RE::BSTEventSource<RE::SaveLoadEvent>*) override
+            {
+                using Status = RE::SaveLoadEvent::Status;
+
+                if (a_event.status == Status::kBegin) {
+                    const bool nonTerminalSave = IsNonTerminalSave(a_event.opType);
+                    ResumeView suspendedView = ResumeView::kNone;
+                    if (nonTerminalSave && dialogueOpen.load() && dialogueCameraOverrideActive.load()) {
+                        suspendedView = CaptureResumeView(RE::PlayerCamera::GetSingleton());
+                    }
+
+                    if (!RestoreDialogueCameraSetting("save/load begin")) {
+                        resumeAfterSave.store(ResumeView::kNone);
+                        dialogueOpen.store(false);
+                        return RE::BSEventNotifyControl::kContinue;
+                    }
+
+                    resumeAfterSave.store(suspendedView);
+                    if (!nonTerminalSave) {
+                        pauseMenuOpen.store(false);
+                        resumeAfterPause.store(ResumeView::kNone);
+                        dialogueOpen.store(false);
+                        dialogueCameraEnabledAtOpen.store(false);
+                    }
+
+                    logger::info(
+                        "Save/load begin reconciled: operation={}, suspended view={}.",
+                        std::to_underlying(a_event.opType),
+                        std::to_underlying(suspendedView));
+                } else if (
+                    a_event.status == Status::kSaveCompleted ||
+                    a_event.status == Status::kFailed) {
+                    const auto suspendedView = resumeAfterSave.exchange(ResumeView::kNone);
+                    if (pauseMenuOpen.load() && suspendedView != ResumeView::kNone) {
+                        if (resumeAfterPause.load() == ResumeView::kNone) {
+                            resumeAfterPause.store(suspendedView);
+                        }
+                        logger::info("Deferred post-save dialogue-view restoration until PauseMenu closes.");
+                    } else {
+                        ResumeDialogueView(suspendedView, "save completion");
+                    }
+                }
+
+                return RE::BSEventNotifyControl::kContinue;
+            }
+        };
 
         class MenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
         {
@@ -111,74 +278,227 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             static MenuSink* GetSingleton()
             {
                 static MenuSink singleton;
-                return std::addressof(singleton);
+                return &singleton;
             }
 
-            RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent& a_event,
+            RE::BSEventNotifyControl ProcessEvent(
+                const RE::MenuOpenCloseEvent& a_event,
                 RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
             {
-                if (a_event.menuName != kDialogueMenuName) {
+                const auto menuName = std::string_view{ a_event.menuName.c_str() };
+                if (menuName == kMainMenuName && a_event.opening) {
+                    dialogueOpen.store(false);
+                    pauseMenuOpen.store(false);
+                    resumeAfterSave.store(ResumeView::kNone);
+                    resumeAfterPause.store(ResumeView::kNone);
+                    if (RestoreDialogueCameraSetting("MainMenu opening")) {
+                        dialogueCameraEnabledAtOpen.store(false);
+                        logger::info("MainMenu opening reconciled the dialogue-camera session.");
+                    }
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                if (menuName == kPauseMenuName) {
+                    if (a_event.opening) {
+                        pauseMenuOpen.store(true);
+                        resumeAfterPause.store(ResumeView::kNone);
+                        if (dialogueOpen.load() && dialogueCameraOverrideActive.load()) {
+                            const auto suspendedView = CaptureResumeView(RE::PlayerCamera::GetSingleton());
+                            if (RestoreDialogueCameraSetting("PauseMenu opening")) {
+                                resumeAfterPause.store(suspendedView);
+                                logger::info(
+                                    "PauseMenu opening suspended dialogue view {}.",
+                                    std::to_underlying(suspendedView));
+                            }
+                        }
+                    } else {
+                        pauseMenuOpen.store(false);
+                        auto suspendedView = resumeAfterPause.exchange(ResumeView::kNone);
+                        if (dialogueOpen.load() && !dialogueCameraOverrideActive.load()) {
+                            const bool liveSetting = dialogueCameraSetting->GetBool();
+                            const bool capturedSetting = dialogueCameraEnabledAtOpen.load();
+                            if (liveSetting != capturedSetting) {
+                                dialogueCameraEnabledAtOpen.store(liveSetting);
+                                logger::info(
+                                    "PauseMenu close adopted the user-changed Dialogue Camera setting {}.",
+                                    liveSetting);
+                            }
+                        }
+                        ResumeDialogueView(suspendedView, "PauseMenu close");
+                    }
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                if (menuName != kDialogueMenuName) {
                     return RE::BSEventNotifyControl::kContinue;
                 }
 
-                dialogueOpen.store(a_event.opening);
+                if (a_event.opening && !RestoreDialogueCameraSetting("DialogueMenu opening")) {
+                    dialogueOpen.store(false);
+                    return RE::BSEventNotifyControl::kContinue;
+                }
 
                 auto const camera = RE::PlayerCamera::GetSingleton();
                 if (!camera) {
-                    dialogueCameraEnabled.store(false);
-                    logger::warn("DialogueMenu {} but PlayerCamera is unavailable.", a_event.opening ? "opened" : "closed");
+                    dialogueOpen.store(false);
+                    pauseMenuOpen.store(false);
+                    resumeAfterSave.store(ResumeView::kNone);
+                    resumeAfterPause.store(ResumeView::kNone);
+                    if (!a_event.opening) {
+                        if (RestoreDialogueCameraSetting("DialogueMenu close without PlayerCamera")) {
+                            dialogueCameraEnabledAtOpen.store(false);
+                        } else {
+                            logger::critical("Dialogue camera state could not be reconciled without PlayerCamera.");
+                        }
+                    }
+                    logger::error(
+                        "DialogueMenu {} but PlayerCamera is unavailable.",
+                        a_event.opening ? "opened" : "closed");
                     return RE::BSEventNotifyControl::kContinue;
                 }
 
                 if (a_event.opening) {
-                    controlsRestoreRequired.store(false);
-                    const bool isFirstPerson = camera->IsInFirstPerson();
-                    const bool isThirdPerson = camera->IsInThirdPerson();
-                    const bool isDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
-                    dialogueCameraEnabled.store(isDialogueCamera);
+                    pauseMenuOpen.store(false);
+                    resumeAfterSave.store(ResumeView::kNone);
+                    resumeAfterPause.store(ResumeView::kNone);
+                    const bool settingEnabled = dialogueCameraSetting->GetBool();
+                    dialogueCameraEnabledAtOpen.store(settingEnabled);
+                    dialogueOpen.store(true);
 
                     logger::info(
-                        "DialogueMenu opened: first={}, third={}, dialogue={}, dialogue camera enabled={}, auto={}.",
-                        isFirstPerson,
-                        isThirdPerson,
-                        isDialogueCamera,
-                        dialogueCameraEnabled.load(),
-                        Settings::Get().autoToggle);
-
-                    if (Settings::Get().autoToggle && !isFirstPerson) {
-                        if (isDialogueCamera) {
-                            controlsRestoreRequired.store(true);
-                        }
-                        camera->ForceFirstPerson();
-                    }
-                } else {
-                    logger::info(
-                        "DialogueMenu closed: dialogue camera enabled={}, auto={}.",
-                        dialogueCameraEnabled.load(),
+                        "DialogueMenu opened: camera={}, dialogue camera setting={}, auto={}.",
+                        CameraStateName(*camera),
+                        settingEnabled,
                         Settings::Get().autoToggle);
 
                     if (Settings::Get().autoToggle) {
-                        camera->ForceThirdPerson();
+                        EnterAutomaticFirstPerson(*camera);
                     }
-                    if (controlsRestoreRequired.exchange(false)) {
-                        if (auto const player = RE::PlayerCharacter::GetSingleton()) {
-                            player->SetControlsDriven(true);
-                            logger::info("Restored player controls after leaving the dialogue camera state.");
-                        } else {
-                            logger::error("PlayerCharacter is unavailable; player controls could not be restored.");
-                        }
+                } else {
+                    dialogueOpen.store(false);
+                    pauseMenuOpen.store(false);
+                    resumeAfterSave.store(ResumeView::kNone);
+                    resumeAfterPause.store(ResumeView::kNone);
+                    logger::info(
+                        "DialogueMenu closed: camera={}, dialogue camera setting={}, override={}, auto={}.",
+                        CameraStateName(*camera),
+                        dialogueCameraSetting->GetBool(),
+                        dialogueCameraOverrideActive.load(),
+                        Settings::Get().autoToggle);
+
+                    if (Settings::Get().autoToggle) {
+                        ExitAutomaticFirstPerson(*camera);
                     }
-                    dialogueCameraEnabled.store(false);
+                    if (!RestoreDialogueCameraSetting("DialogueMenu close")) {
+                        return RE::BSEventNotifyControl::kContinue;
+                    }
+                    dialogueCameraEnabledAtOpen.store(false);
+
+                    logger::info(
+                        "Dialogue close reconciliation finished: camera={}, dialogue camera setting={}.",
+                        CameraStateName(*camera),
+                        dialogueCameraSetting->GetBool());
                 }
                 return RE::BSEventNotifyControl::kContinue;
             }
         };
     }
 
+    bool IsOpen()
+    {
+        return dialogueOpen.load();
+    }
+
+    void Toggle()
+    {
+        if (!dialogueOpen.load()) {
+            return;
+        }
+
+        auto const camera = RE::PlayerCamera::GetSingleton();
+        if (!camera) {
+            logger::warn("Toggle input received, but PlayerCamera is unavailable.");
+            return;
+        }
+
+        const bool wasFirstPerson = camera->IsInFirstPerson();
+        const bool wasThirdPerson = camera->IsInThirdPerson();
+        const bool wasDialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
+        const bool nativeDialogueCameraEnabled = dialogueCameraEnabledAtOpen.load();
+        const char* target = "unchanged";
+
+        if (nativeDialogueCameraEnabled) {
+            if (wasDialogueCamera) {
+                if (!SuppressDialogueCamera("manual dialogue-to-third-person toggle")) {
+                    return;
+                }
+                if (!SelectThirdPerson(*camera, true)) {
+                    logger::error("Dialogue-to-third-person toggle failed; camera remained {}.", CameraStateName(*camera));
+                    if (!RestoreDialogueCameraSetting("failed dialogue-to-third-person toggle")) {
+                        logger::critical("Failed transition also left the runtime setting unrestored.");
+                    }
+                    return;
+                }
+                target = "third person";
+            } else if (wasThirdPerson) {
+                if (!RestoreDialogueCameraSetting("manual third-person-to-dialogue toggle")) {
+                    return;
+                }
+
+                // The active dialogue watchdog performs the full target-aware entry next update.
+                target = "dialogue camera via vanilla re-entry";
+            } else {
+                if (!SuppressDialogueCamera("manual first/other-to-third-person toggle")) {
+                    return;
+                }
+                if (!SelectThirdPerson(*camera, false)) {
+                    logger::error("First/other-to-third-person toggle failed; camera remained {}.", CameraStateName(*camera));
+                    if (!RestoreDialogueCameraSetting("failed first/other-to-third-person toggle")) {
+                        logger::critical("Failed transition also left the runtime setting unrestored.");
+                    }
+                    return;
+                }
+                target = "third person";
+            }
+        } else if (wasFirstPerson) {
+            if (!SelectThirdPerson(*camera, false)) {
+                logger::error("First-to-third-person toggle failed; camera remained {}.", CameraStateName(*camera));
+                return;
+            }
+            target = "third person";
+        } else if (wasThirdPerson) {
+            if (!SelectFirstPerson(*camera, false)) {
+                logger::error("Third-to-first-person toggle failed; camera remained {}.", CameraStateName(*camera));
+                return;
+            }
+            target = "first person";
+        } else if (wasDialogueCamera) {
+            if (!SelectThirdPerson(*camera, true)) {
+                logger::error("Unexpected dialogue-to-third-person toggle failed; camera remained {}.", CameraStateName(*camera));
+                return;
+            }
+            target = "third person after unexpected dialogue state";
+        } else {
+            if (!SelectFirstPerson(*camera, false)) {
+                logger::error("Other-to-first-person toggle failed; camera remained {}.", CameraStateName(*camera));
+                return;
+            }
+            target = "first person";
+        }
+
+        logger::info(
+            "Dialogue toggle: before[first={}, third={}, dialogue={}], native setting={}, override={}, target={}, after={}.",
+            wasFirstPerson,
+            wasThirdPerson,
+            wasDialogueCamera,
+            nativeDialogueCameraEnabled,
+            dialogueCameraOverrideActive.load(),
+            target,
+            CameraStateName(*camera));
+    }
+
     bool Install()
     {
         if (installAttempted.exchange(true)) {
-            logger::error("Installation was requested more than once.");
+            logger::warn("Dialogue camera installation was already attempted.");
             return false;
         }
 
@@ -190,26 +510,30 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             return false;
         }
 
-        REL::Relocation<std::uintptr_t> dialogueMenuInputVtable{ RE::VTABLE::DialogueMenu[kDialogueMenuInputVtable] };
-        const auto slotAddress = dialogueMenuInputVtable.address() + sizeof(std::uintptr_t) * kOnButtonEventSlot;
-        const auto originalAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
-        if (originalAddress == 0 ||
-            std::memcmp(reinterpret_cast<const void*>(originalAddress), kExpectedButtonHandlerPrologue.data(), kExpectedButtonHandlerPrologue.size()) != 0) {
-            logger::error("DialogueMenu button handler preflight failed; hook was not installed.");
+        auto const saveLoadSource = RE::SaveLoadEvent::GetEventSource();
+        if (!saveLoadSource) {
+            logger::error("SaveLoadEvent source is unavailable.");
             return false;
         }
 
-        originalButtonHandler = REX::UNRESTRICTED_CAST<ButtonHandler>(dialogueMenuInputVtable.write_vfunc(kOnButtonEventSlot, ProcessButton));
-        const auto installedAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
-        if (installedAddress != REX::UNRESTRICTED_CAST<std::uintptr_t>(ProcessButton)) {
-            dialogueMenuInputVtable.write_vfunc(kOnButtonEventSlot, originalAddress);
-            originalButtonHandler = nullptr;
-            logger::error("DialogueMenu button handler readback failed; original target restored.");
+        dialogueCameraSetting = RE::GetINISetting(kDialogueCameraSettingName);
+        if (!dialogueCameraSetting || !dialogueCameraSetting->Is<bool>()) {
+            logger::error("Could not resolve {} as a Boolean INI preference.", kDialogueCameraSettingName);
+            dialogueCameraSetting = nullptr;
+            return false;
+        }
+
+        if (!Input::Install()) {
+            logger::error("The dialogue input hook could not be installed.");
             return false;
         }
 
         ui->RegisterSink<RE::MenuOpenCloseEvent>(MenuSink::GetSingleton());
-        logger::info("Installed DialogueMenu TogglePOV input hook at {:X}.", originalAddress);
+        saveLoadSource->RegisterSink(SaveLoadSink::GetSingleton());
+        logger::info(
+            "Dialogue camera support installed; {} currently {}.",
+            kDialogueCameraSettingName,
+            dialogueCameraSetting->GetBool());
         return true;
     }
 }

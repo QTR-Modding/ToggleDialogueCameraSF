@@ -35,7 +35,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
         return false;
     }
 
-    const auto const messaging = SFSE::GetMessagingInterface();
+    const auto messaging = SFSE::GetMessagingInterface();
     if (!messaging) {
         logger::critical("Required SFSE MessagingInterface is unavailable.");
         return false;
@@ -45,8 +45,6 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
         return false;
     }
 
-    logger::info(
-        "Toggle Dialogue Camera SF initialized on Starfield {}; waiting for post-data-load.",
-        runtime.string());
+    logger::info("Initialized on Starfield {}; waiting for post-data-load.", runtime.string());
     return true;
 }
