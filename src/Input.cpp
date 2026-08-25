@@ -10,21 +10,16 @@ namespace ToggleDialogueCameraSF::Input
         constexpr std::int32_t kMouseWheelDown{ 0x900 };
 
         // PlayerControls::Manager is the first normal receiver on Starfield 1.16.244.
-        // View-button presses are consumed there before vanilla can claim them.
+        // Custom view inputs are consumed there before vanilla can claim them.
         constexpr std::size_t kPlayerControlsInputVtable = 8;
-        constexpr std::size_t kUIInputVtable = 10;
         constexpr std::size_t kPerformInputProcessingSlot = 1;
         constexpr std::size_t kMaximumQueueLength = 512;
         constexpr std::array<std::uint8_t, 16> kExpectedPlayerControlsInputPrologue{
             0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x56, 0x57, 0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x20
         };
-        constexpr std::array<std::uint8_t, 16> kExpectedUIInputPrologue{
-            0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48, 0x89, 0x70, 0x18, 0x48, 0x89, 0x78, 0x20, 0x55
-        };
 
         using InputProcessor = void (*)(RE::BSInputEventReceiver*, const RE::InputEvent*);
         InputProcessor originalPlayerControlsInput{ nullptr };
-        InputProcessor originalUIInput{ nullptr };
 
         enum class MouseWheelDirection : std::uint8_t
         {
@@ -104,11 +99,18 @@ namespace ToggleDialogueCameraSF::Input
                 auto event = a_queueHead;
                 std::size_t eventCount = 0;
                 bool toggleRequested = false;
+                const RE::ButtonEvent* firstMouseWheelInput = nullptr;
                 while (event && eventCount < kMaximumQueueLength) {
                     if (event->eventType == RE::InputEvent::EventType::kButton) {
                         auto const button = static_cast<const RE::ButtonEvent*>(event);
                         if (ConsumeViewButton(button, toggleRequested)) {
                             toggleRequested = true;
+                        }
+                        if (!firstMouseWheelInput &&
+                            button->status != RE::InputEvent::Status::kStop &&
+                            button->value != 0.0F && button->heldDownSecs == 0.0F &&
+                            GetMouseWheelDirection(*button) != MouseWheelDirection::kNone) {
+                            firstMouseWheelInput = button;
                         }
                     }
                     event = event->next;
@@ -122,57 +124,26 @@ namespace ToggleDialogueCameraSF::Input
                 }
                 if (toggleRequested) {
                     DialogueCamera::Toggle();
-                }
-            }
-
-            originalPlayerControlsInput(a_receiver, a_queueHead);
-        }
-
-        void ProcessUIInput(RE::BSInputEventReceiver* a_receiver, const RE::InputEvent* a_queueHead)
-        {
-            if (DialogueCamera::IsOpen()) {
-                auto event = a_queueHead;
-                std::size_t eventCount = 0;
-                const RE::ButtonEvent* lastMouseWheelInput = nullptr;
-                while (event && eventCount < kMaximumQueueLength) {
-                    if (event->eventType == RE::InputEvent::EventType::kButton) {
-                        auto const button = static_cast<const RE::ButtonEvent*>(event);
-                        if (button->status != RE::InputEvent::Status::kStop &&
-                            button->value != 0.0F && button->heldDownSecs == 0.0F &&
-                            GetMouseWheelDirection(*button) != MouseWheelDirection::kNone) {
-                            lastMouseWheelInput = button;
-                        }
-                    }
-                    event = event->next;
-                    ++eventCount;
-                }
-
-                if (event) {
-                    logger::error(
-                        "UI input queue exceeded {} events; remaining events were not inspected.",
-                        kMaximumQueueLength);
-                }
-
-                if (lastMouseWheelInput) {
-                    const auto direction = GetMouseWheelDirection(*lastMouseWheelInput);
+                } else if (firstMouseWheelInput) {
+                    const auto direction = GetMouseWheelDirection(*firstMouseWheelInput);
                     if (DialogueCamera::HandleMouseWheel(direction == MouseWheelDirection::kIn)) {
-                        auto* const mutableMouseWheelInput = const_cast<RE::ButtonEvent*>(lastMouseWheelInput);
+                        auto* const mutableMouseWheelInput = const_cast<RE::ButtonEvent*>(firstMouseWheelInput);
                         const auto previousStatus = mutableMouseWheelInput->status;
                         mutableMouseWheelInput->status = RE::InputEvent::Status::kStop;
 
                         logger::info(
-                            "Mouse zoom boundary consumed before UI: "
+                            "Mouse dialogue-view input consumed before PlayerControls: "
                             "direction={}, id={}, event={}, time={}, prior status={}.",
                             direction == MouseWheelDirection::kIn ? "in" : "out",
-                            lastMouseWheelInput->idCode,
-                            lastMouseWheelInput->QUserEvent().c_str(),
-                            lastMouseWheelInput->timeCode,
+                            firstMouseWheelInput->idCode,
+                            firstMouseWheelInput->QUserEvent().c_str(),
+                            firstMouseWheelInput->timeCode,
                             std::to_underlying(previousStatus));
                     }
                 }
             }
 
-            originalUIInput(a_receiver, a_queueHead);
+            originalPlayerControlsInput(a_receiver, a_queueHead);
         }
 
         template <std::size_t N>
@@ -227,41 +198,6 @@ namespace ToggleDialogueCameraSF::Input
             logger::info("Installed {} at {:X}.", a_name, originalAddress);
             return true;
         }
-
-        [[nodiscard]] bool RestoreVtableHook(
-            REL::Relocation<std::uintptr_t>& a_vtable,
-            const std::size_t a_slot,
-            const std::uintptr_t a_hookAddress,
-            InputProcessor& a_original,
-            const std::string_view a_name)
-        {
-            const auto slotAddress = a_vtable.address() + sizeof(std::uintptr_t) * a_slot;
-            auto liveAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
-            if (liveAddress != a_hookAddress) {
-                logger::critical(
-                    "{} rollback could not safely proceed because the live slot changed; "
-                    "the original chain pointer was retained in case this hook remains reachable.",
-                    a_name);
-                return false;
-            }
-
-            const auto chainAddress = REX::UNRESTRICTED_CAST<std::uintptr_t>(a_original);
-            if (chainAddress == 0) {
-                logger::critical("{} rollback has no valid chain target while the hook is live.", a_name);
-                return false;
-            }
-
-            a_vtable.write_vfunc(a_slot, chainAddress);
-            liveAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
-            const bool restored = liveAddress == chainAddress;
-            if (restored) {
-                a_original = nullptr;
-                logger::info("{} rollback restored the original chain.", a_name);
-            } else {
-                logger::critical("{} rollback failed to restore the original chain.", a_name);
-            }
-            return restored;
-        }
     }
 
     bool Install()
@@ -270,38 +206,12 @@ namespace ToggleDialogueCameraSF::Input
             RE::VTABLE::PlayerControls__Manager[kPlayerControlsInputVtable]
         };
         const auto playerControlsHookAddress = REX::UNRESTRICTED_CAST<std::uintptr_t>(ProcessPlayerControlsInput);
-        if (!InstallVtableHook(
-                playerControlsInputVtable,
-                kPerformInputProcessingSlot,
-                playerControlsHookAddress,
-                kExpectedPlayerControlsInputPrologue,
-                originalPlayerControlsInput,
-                "PlayerControls::Manager PerformInputProcessing hook")) {
-            return false;
-        }
-
-        REL::Relocation<std::uintptr_t> uiInputVtable{
-            RE::VTABLE::UI[kUIInputVtable]
-        };
-        const auto uiHookAddress = REX::UNRESTRICTED_CAST<std::uintptr_t>(ProcessUIInput);
-        if (!InstallVtableHook(
-                uiInputVtable,
-                kPerformInputProcessingSlot,
-                uiHookAddress,
-                kExpectedUIInputPrologue,
-                originalUIInput,
-                "UI PerformInputProcessing hook")) {
-            if (!RestoreVtableHook(
-                    playerControlsInputVtable,
-                    kPerformInputProcessingSlot,
-                    playerControlsHookAddress,
-                    originalPlayerControlsInput,
-                    "PlayerControls::Manager PerformInputProcessing hook")) {
-                logger::critical("PlayerControls input hook remained live after UI hook installation failed.");
-            }
-            return false;
-        }
-
-        return true;
+        return InstallVtableHook(
+            playerControlsInputVtable,
+            kPerformInputProcessingSlot,
+            playerControlsHookAddress,
+            kExpectedPlayerControlsInputPrologue,
+            originalPlayerControlsInput,
+            "PlayerControls::Manager PerformInputProcessing hook");
     }
 }

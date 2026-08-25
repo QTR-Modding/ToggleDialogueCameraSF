@@ -468,13 +468,29 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             return false;
         }
 
-        if (a_zoomIn && camera->IsInFirstPerson() && dialogueCameraOverrideActive.load()) {
-            if (EnterDialogueCamera(*camera, "mouse zoom-in boundary")) {
-                logger::info("Mouse zoom-in boundary selected dialogue camera.");
-            }
+        const bool dialogueCamera = camera->QCameraEquals(RE::CameraState::kDialogue);
+        auto const thirdPersonState = camera->GetThirdPersonState();
+        const bool nearThirdPerson =
+            camera->IsInThirdPerson() && thirdPersonState &&
+            !thirdPersonState->IsCameraNearFarMode();
+        const bool farThirdPerson =
+            camera->IsInThirdPerson() && thirdPersonState &&
+            thirdPersonState->IsCameraNearFarMode();
+
+        // Starfield forwards wheel events from DialogueCameraState to
+        // ThirdPersonState, so terminal-direction events must be stopped too.
+        if ((a_zoomIn && dialogueCamera) || (!a_zoomIn && farThirdPerson)) {
             return true;
         }
-        if (!a_zoomIn && camera->QCameraEquals(RE::CameraState::kDialogue)) {
+        if (a_zoomIn && dialogueCameraOverrideActive.load()) {
+            if (nearThirdPerson || camera->IsInFirstPerson()) {
+                if (EnterDialogueCamera(*camera, "mouse zoom-in boundary")) {
+                    logger::info("Mouse zoom-in boundary selected dialogue camera.");
+                }
+                return true;
+            }
+        }
+        if (!a_zoomIn && dialogueCamera) {
             if (ExitDialogueCameraToThirdPerson(*camera, "mouse zoom-out boundary")) {
                 logger::info("Mouse zoom-out boundary selected third person.");
             }

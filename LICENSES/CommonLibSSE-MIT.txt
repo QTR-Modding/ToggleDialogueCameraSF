@@ -1,6 +1,8 @@
+This applies to the files taken with modifications from CommonLibSSE and its variant CommonLibSSE-NG
+
 MIT License
 
-Copyright (c) 2026 Quantumyilmaz
+Copyright (c) 2018 Ryan-rsm-McKenzie
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
