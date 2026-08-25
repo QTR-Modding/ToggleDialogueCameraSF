@@ -226,13 +226,18 @@ namespace ToggleDialogueCameraSF::Input
                 if (lastMouseWheelInput) {
                     const auto direction = GetMouseWheelDirection(*lastMouseWheelInput);
                     if (DialogueCamera::HandleMouseWheel(direction == MouseWheelDirection::kIn)) {
+                        auto* const mutableMouseWheelInput = const_cast<RE::ButtonEvent*>(lastMouseWheelInput);
+                        const auto previousStatus = mutableMouseWheelInput->status;
+                        mutableMouseWheelInput->status = RE::InputEvent::Status::kStop;
+
                         logger::info(
-                            "Mouse zoom boundary matched: direction={}, id={}, event={}, time={}, status preserved={}.",
+                            "Mouse zoom boundary consumed before UI: "
+                            "direction={}, id={}, event={}, time={}, prior status={}.",
                             direction == MouseWheelDirection::kIn ? "in" : "out",
                             lastMouseWheelInput->idCode,
                             lastMouseWheelInput->QUserEvent().c_str(),
                             lastMouseWheelInput->timeCode,
-                            std::to_underlying(lastMouseWheelInput->status));
+                            std::to_underlying(previousStatus));
                     }
                 }
             }
