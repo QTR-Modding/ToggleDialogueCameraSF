@@ -169,12 +169,16 @@ namespace ToggleDialogueCameraSF::Input
                 auto event = a_queueHead;
                 std::size_t eventCount = 0;
                 bool toggleRequested = false;
+                bool cycleThirdPersonDistance = false;
                 while (event && eventCount < kMaximumQueueLength) {
                     if (event->eventType == RE::InputEvent::EventType::kButton) {
                         auto const button = static_cast<const RE::ButtonEvent*>(event);
                         LogKeyboardToggleCandidate(*button);
                         if (ConsumeToggleInput(button, toggleRequested)) {
                             toggleRequested = true;
+                            cycleThirdPersonDistance =
+                                button->deviceType == RE::InputEvent::DeviceType::kGamepad &&
+                                IsConfiguredToggleInput(*button);
                         }
                     }
                     event = event->next;
@@ -187,7 +191,7 @@ namespace ToggleDialogueCameraSF::Input
                         kMaximumQueueLength);
                 }
                 if (toggleRequested) {
-                    DialogueCamera::Toggle();
+                    DialogueCamera::Toggle(cycleThirdPersonDistance);
                 }
             }
 

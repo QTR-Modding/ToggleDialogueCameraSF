@@ -11,7 +11,7 @@ includes(path.join(os.projectdir(), "lib", "commonlibsf"))
 
 local plugin_name = "Toggle Dialogue Camera SF"
 local dll_name = "ToggleDialogueCameraSF"
-local plugin_version = "0.8.0"
+local plugin_version = "0.9.0"
 local plugin_author = "Quantumyilmaz"
 
 set_project(plugin_name)

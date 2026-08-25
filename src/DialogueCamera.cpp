@@ -33,7 +33,13 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                 return "first person";
             }
             if (a_camera.IsInThirdPerson()) {
-                return "third person";
+                auto const thirdPersonState = a_camera.GetThirdPersonState();
+                if (!thirdPersonState) {
+                    return "third person";
+                }
+                return thirdPersonState->IsCameraNearFarMode() ?
+                           "far third person" :
+                           "near third person";
             }
             if (a_camera.QCameraEquals(RE::CameraState::kDialogue)) {
                 return "dialogue";
@@ -527,7 +533,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         return false;
     }
 
-    void Toggle()
+    void Toggle(const bool a_cycleThirdPersonDistance)
     {
         if (!dialogueOpen.load()) {
             return;
@@ -550,12 +556,48 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                 if (!ExitDialogueCameraToThirdPerson(*camera, "manual dialogue-to-third-person toggle")) {
                     return;
                 }
-                target = "third person";
+                target = "near third person";
             } else if (wasThirdPerson) {
-                if (!EnterDialogueCamera(*camera, "manual third-person-to-dialogue toggle")) {
-                    return;
+                if (a_cycleThirdPersonDistance) {
+                    auto const thirdPersonState = camera->GetThirdPersonState();
+                    if (!thirdPersonState) {
+                        logger::error("Gamepad third-person cycle failed because ThirdPersonState is unavailable.");
+                        return;
+                    }
+
+                    if (!thirdPersonState->IsCameraNearFarMode()) {
+                        const bool overrideWasActive = dialogueCameraOverrideActive.load();
+                        if (!SuppressDialogueCamera("manual near-third-person-to-far-third-person toggle")) {
+                            return;
+                        }
+
+                        thirdPersonState->EnableCameraNearFarMode();
+                        const bool farModeEnabled = thirdPersonState->IsCameraNearFarMode();
+                        if (!camera->IsInThirdPerson() || !farModeEnabled) {
+                            logger::error(
+                                "Near-to-far third-person transition failed: camera={}, CameraNearFar mode={}.",
+                                CameraStateName(*camera),
+                                farModeEnabled);
+                            if (!overrideWasActive &&
+                                !RestoreDialogueCameraSetting("failed near-to-far third-person toggle")) {
+                                logger::critical(
+                                    "Failed far-camera transition also left the runtime setting unrestored.");
+                            }
+                            return;
+                        }
+                        target = "far third person";
+                    } else {
+                        if (!EnterDialogueCamera(*camera, "manual far-third-person-to-dialogue toggle")) {
+                            return;
+                        }
+                        target = "dialogue camera";
+                    }
+                } else {
+                    if (!EnterDialogueCamera(*camera, "manual third-person-to-dialogue toggle")) {
+                        return;
+                    }
+                    target = "dialogue camera";
                 }
-                target = "dialogue camera";
             } else {
                 if (!SuppressDialogueCamera("manual first/other-to-third-person toggle")) {
                     return;
