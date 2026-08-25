@@ -9,6 +9,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         constexpr std::string_view kMainMenuName{ "MainMenu" };
         constexpr std::string_view kPauseMenuName{ "PauseMenu" };
         constexpr std::string_view kDialogueCameraSettingName{ "bDialogueEnable:Interface" };
+        constexpr float kFarThirdPersonTargetZoom{ 1.0F };
 
         enum class ResumeView : std::uint8_t
         {
@@ -26,6 +27,12 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         std::atomic_bool installAttempted{ false };
         RE::Setting* dialogueCameraSetting{ nullptr };
 
+        [[nodiscard]] bool IsFarThirdPerson(const RE::ThirdPersonState& a_state)
+        {
+            return a_state.IsCameraNearFarMode() &&
+                   a_state.GetCameraTargetZoom() >= kFarThirdPersonTargetZoom;
+        }
+
         [[nodiscard]] const char* CameraStateName(const RE::PlayerCamera& a_camera)
         {
             if (a_camera.IsInFirstPerson()) {
@@ -36,7 +43,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                 if (!thirdPersonState) {
                     return "third person";
                 }
-                return thirdPersonState->IsCameraNearFarMode() ?
+                return IsFarThirdPerson(*thirdPersonState) ?
                            "far third person" :
                            "near third person";
             }
@@ -472,10 +479,10 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         auto const thirdPersonState = camera->GetThirdPersonState();
         const bool nearThirdPerson =
             camera->IsInThirdPerson() && thirdPersonState &&
-            !thirdPersonState->IsCameraNearFarMode();
+            !IsFarThirdPerson(*thirdPersonState);
         const bool farThirdPerson =
             camera->IsInThirdPerson() && thirdPersonState &&
-            thirdPersonState->IsCameraNearFarMode();
+            IsFarThirdPerson(*thirdPersonState);
 
         // Starfield forwards wheel events from DialogueCameraState to
         // ThirdPersonState, so terminal-direction events must be stopped too.
@@ -498,6 +505,27 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         }
 
         return false;
+    }
+
+    bool ShouldStopMouseWheelAfterThirdPerson(
+        const RE::ThirdPersonState& a_state,
+        const bool a_zoomIn)
+    {
+        if (!dialogueOpen.load() ||
+            !dialogueCameraEnabledAtOpen.load() ||
+            !dialogueCameraOverrideActive.load()) {
+            return false;
+        }
+
+        auto const camera = RE::PlayerCamera::GetSingleton();
+        if (!camera ||
+            !camera->IsInThirdPerson() ||
+            camera->GetThirdPersonState() != &a_state) {
+            return false;
+        }
+
+        const bool farThirdPerson = IsFarThirdPerson(a_state);
+        return a_zoomIn ? farThirdPerson : !farThirdPerson;
     }
 
     void Toggle()
@@ -531,19 +559,19 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                     return;
                 }
 
-                if (!thirdPersonState->IsCameraNearFarMode()) {
+                if (!IsFarThirdPerson(*thirdPersonState)) {
                     const bool overrideWasActive = dialogueCameraOverrideActive.load();
                     if (!SuppressDialogueCamera("manual near-third-person-to-far-third-person toggle")) {
                         return;
                     }
 
                     thirdPersonState->EnableCameraNearFarMode();
-                    const bool farModeEnabled = thirdPersonState->IsCameraNearFarMode();
-                    if (!camera->IsInThirdPerson() || !farModeEnabled) {
+                    const bool farThirdPerson = IsFarThirdPerson(*thirdPersonState);
+                    if (!camera->IsInThirdPerson() || !farThirdPerson) {
                         logger::error(
-                            "Near-to-far third-person transition failed: camera={}, CameraNearFar mode={}.",
+                            "Near-to-far third-person transition failed: camera={}, target zoom={}.",
                             CameraStateName(*camera),
-                            farModeEnabled);
+                            thirdPersonState->GetCameraTargetZoom());
                         if (!overrideWasActive &&
                             !RestoreDialogueCameraSetting("failed near-to-far third-person toggle")) {
                             logger::critical(
