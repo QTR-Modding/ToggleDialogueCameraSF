@@ -115,6 +115,102 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             return a_camera.IsInFirstPerson();
         }
 
+        [[nodiscard]] bool ExitDialogueCameraToThirdPerson(
+            RE::PlayerCamera& a_camera,
+            const std::string_view a_reason)
+        {
+            if (!SuppressDialogueCamera(a_reason)) {
+                return false;
+            }
+            if (SelectThirdPerson(a_camera, true)) {
+                return true;
+            }
+
+            logger::error(
+                "Dialogue-to-third-person transition failed during {}; camera remained {}.",
+                a_reason,
+                CameraStateName(a_camera));
+            if (!RestoreDialogueCameraSetting("failed dialogue-to-third-person transition")) {
+                logger::critical("Failed transition also left the runtime setting unrestored.");
+            }
+            return false;
+        }
+
+        [[nodiscard]] bool EnterDialogueCamera(
+            RE::PlayerCamera& a_camera,
+            const std::string_view a_reason)
+        {
+            auto const player = RE::PlayerCharacter::GetSingleton();
+            if (!player) {
+                logger::error("Dialogue-camera entry failed during {} because PlayerCharacter is unavailable.", a_reason);
+                return false;
+            }
+
+            const ResumeView sourceView =
+                a_camera.IsInFirstPerson() ? ResumeView::kFirstPerson :
+                a_camera.IsInThirdPerson() ? ResumeView::kThirdPerson :
+                                             ResumeView::kNone;
+            if (sourceView == ResumeView::kNone) {
+                logger::error(
+                    "Dialogue-camera entry was rejected during {} because the source camera was {}.",
+                    a_reason,
+                    CameraStateName(a_camera));
+                return false;
+            }
+
+            const bool ownedDialogueCameraOverride = dialogueCameraOverrideActive.load();
+            if (!RestoreDialogueCameraSetting(a_reason)) {
+                return false;
+            }
+
+            const bool started = player->StartDialogueCamera(false);
+            const bool enteredDialogue = a_camera.QCameraEquals(RE::CameraState::kDialogue);
+            if (!enteredDialogue) {
+                logger::error(
+                    "Dialogue-camera entry failed during {}: engine start returned {}, camera={}.",
+                    a_reason,
+                    started,
+                    CameraStateName(a_camera));
+
+                const bool suppressionRestored =
+                    !ownedDialogueCameraOverride ||
+                    SuppressDialogueCamera("failed dialogue-camera entry");
+                bool failureViewRestored =
+                    (sourceView == ResumeView::kFirstPerson && a_camera.IsInFirstPerson()) ||
+                    (sourceView == ResumeView::kThirdPerson && a_camera.IsInThirdPerson());
+                if (!failureViewRestored) {
+                    if (sourceView == ResumeView::kFirstPerson) {
+                        a_camera.SetCameraState(RE::CameraState::kFirstPerson);
+                    } else {
+                        a_camera.SetCameraState(RE::CameraState::kThirdPerson);
+                    }
+
+                    failureViewRestored =
+                        (sourceView == ResumeView::kFirstPerson && a_camera.IsInFirstPerson()) ||
+                        (sourceView == ResumeView::kThirdPerson && a_camera.IsInThirdPerson());
+                }
+
+                if (!suppressionRestored) {
+                    logger::critical(
+                        "Failed dialogue-camera entry could not reacquire the runtime Dialogue Camera override.");
+                }
+                if (!failureViewRestored) {
+                    logger::critical(
+                        "Failed dialogue-camera entry could not restore source view {}; camera remained {}.",
+                        std::to_underlying(sourceView),
+                        CameraStateName(a_camera));
+                }
+                return false;
+            }
+
+            if (!started) {
+                logger::warn(
+                    "Dialogue camera reached the requested state during {} although the engine start call returned false.",
+                    a_reason);
+            }
+            return true;
+        }
+
         void EnterAutomaticFirstPerson(RE::PlayerCamera& a_camera)
         {
             const bool fromDialogue = a_camera.QCameraEquals(RE::CameraState::kDialogue);
@@ -403,6 +499,34 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         return dialogueOpen.load();
     }
 
+    bool HandleMouseWheel(const bool a_zoomIn)
+    {
+        if (!dialogueOpen.load() || !dialogueCameraEnabledAtOpen.load()) {
+            return false;
+        }
+
+        auto const camera = RE::PlayerCamera::GetSingleton();
+        if (!camera) {
+            logger::warn("Mouse-wheel input received, but PlayerCamera is unavailable.");
+            return false;
+        }
+
+        if (a_zoomIn && camera->IsInFirstPerson() && dialogueCameraOverrideActive.load()) {
+            if (EnterDialogueCamera(*camera, "mouse zoom-in boundary")) {
+                logger::info("Mouse zoom-in boundary selected dialogue camera.");
+            }
+            return true;
+        }
+        if (!a_zoomIn && camera->QCameraEquals(RE::CameraState::kDialogue)) {
+            if (ExitDialogueCameraToThirdPerson(*camera, "mouse zoom-out boundary")) {
+                logger::info("Mouse zoom-out boundary selected third person.");
+            }
+            return true;
+        }
+
+        return false;
+    }
+
     void Toggle()
     {
         if (!dialogueOpen.load()) {
@@ -423,58 +547,13 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
         if (nativeDialogueCameraEnabled) {
             if (wasDialogueCamera) {
-                if (!SuppressDialogueCamera("manual dialogue-to-third-person toggle")) {
-                    return;
-                }
-                if (!SelectThirdPerson(*camera, true)) {
-                    logger::error("Dialogue-to-third-person toggle failed; camera remained {}.", CameraStateName(*camera));
-                    if (!RestoreDialogueCameraSetting("failed dialogue-to-third-person toggle")) {
-                        logger::critical("Failed transition also left the runtime setting unrestored.");
-                    }
+                if (!ExitDialogueCameraToThirdPerson(*camera, "manual dialogue-to-third-person toggle")) {
                     return;
                 }
                 target = "third person";
             } else if (wasThirdPerson) {
-                auto const player = RE::PlayerCharacter::GetSingleton();
-                if (!player) {
-                    logger::error("Third-person-to-dialogue toggle failed because PlayerCharacter is unavailable.");
+                if (!EnterDialogueCamera(*camera, "manual third-person-to-dialogue toggle")) {
                     return;
-                }
-                const bool ownedDialogueCameraOverride = dialogueCameraOverrideActive.load();
-                if (!RestoreDialogueCameraSetting("manual third-person-to-dialogue toggle")) {
-                    return;
-                }
-
-                const bool started = player->StartDialogueCamera(false);
-                const bool enteredDialogue = camera->QCameraEquals(RE::CameraState::kDialogue);
-                if (!enteredDialogue) {
-                    logger::error(
-                        "Third-person-to-dialogue toggle failed: engine start returned {}, camera={}.",
-                        started,
-                        CameraStateName(*camera));
-
-                    const bool suppressionRestored =
-                        !ownedDialogueCameraOverride ||
-                        SuppressDialogueCamera("failed third-person-to-dialogue toggle");
-                    if (ownedDialogueCameraOverride && suppressionRestored && !camera->IsInThirdPerson()) {
-                        camera->SetCameraState(RE::CameraState::kThirdPerson);
-                    }
-
-                    if (!suppressionRestored) {
-                        logger::critical(
-                            "Failed dialogue re-entry could not reacquire the runtime Dialogue Camera override.");
-                    }
-                    if (ownedDialogueCameraOverride && suppressionRestored && !camera->IsInThirdPerson()) {
-                        logger::critical(
-                            "Failed dialogue re-entry also left the camera in {}.",
-                            CameraStateName(*camera));
-                    }
-                    return;
-                }
-
-                if (!started) {
-                    logger::warn(
-                        "Dialogue camera reached the requested state although the engine start call returned false.");
                 }
                 target = "dialogue camera";
             } else {
