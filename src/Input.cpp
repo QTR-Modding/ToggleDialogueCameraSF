@@ -10,7 +10,7 @@ namespace ToggleDialogueCameraSF::Input
         constexpr std::int32_t kMouseWheelDown{ 0x900 };
 
         // PlayerControls::Manager is the first normal receiver on Starfield 1.16.244.
-        // Right-stick clicks are consumed there before vanilla can claim them.
+        // View-button presses are consumed there before vanilla can claim them.
         constexpr std::size_t kPlayerControlsInputVtable = 8;
         constexpr std::size_t kUIInputVtable = 10;
         constexpr std::size_t kPerformInputProcessingSlot = 1;
@@ -66,17 +66,18 @@ namespace ToggleDialogueCameraSF::Input
             return MouseWheelDirection::kNone;
         }
 
-        [[nodiscard]] bool IsRightStickClick(const RE::ButtonEvent& a_button)
+        [[nodiscard]] bool IsViewButton(const RE::ButtonEvent& a_button)
         {
+            // XInput's legacy BACK name is the Xbox View button (two overlapping rectangles).
             return a_button.deviceType == RE::InputEvent::DeviceType::kGamepad &&
-                   a_button.idCode == REX::W32::XINPUT_GAMEPAD_RIGHT_THUMB;
+                   a_button.idCode == REX::W32::XINPUT_GAMEPAD_BACK;
         }
 
-        [[nodiscard]] bool ConsumeRightStickClick(
+        [[nodiscard]] bool ConsumeViewButton(
             const RE::ButtonEvent* a_button,
             const bool a_toggleAlreadyRequested)
         {
-            if (!a_button || a_button->status == RE::InputEvent::Status::kStop || !IsRightStickClick(*a_button)) {
+            if (!a_button || a_button->status == RE::InputEvent::Status::kStop || !IsViewButton(*a_button)) {
                 return false;
             }
 
@@ -90,7 +91,7 @@ namespace ToggleDialogueCameraSF::Input
             }
 
             logger::info(
-                "Right-stick input accepted before PlayerControls: event={}, time={}, prior status={}.",
+                "View-button input accepted before PlayerControls: event={}, time={}, prior status={}.",
                 a_button->QUserEvent().c_str(),
                 a_button->timeCode,
                 std::to_underlying(previousStatus));
@@ -106,7 +107,7 @@ namespace ToggleDialogueCameraSF::Input
                 while (event && eventCount < kMaximumQueueLength) {
                     if (event->eventType == RE::InputEvent::EventType::kButton) {
                         auto const button = static_cast<const RE::ButtonEvent*>(event);
-                        if (ConsumeRightStickClick(button, toggleRequested)) {
+                        if (ConsumeViewButton(button, toggleRequested)) {
                             toggleRequested = true;
                         }
                     }
