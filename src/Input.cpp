@@ -1,19 +1,16 @@
 #include "Input.h"
 #include "DialogueCamera.h"
-#include "Settings.h"
+#include "REX/W32/XINPUT.h"
 
 namespace ToggleDialogueCameraSF::Input
 {
     namespace
     {
-        constexpr std::string_view kTogglePOVEvent{ "TogglePOV" };
-        constexpr std::string_view kZoomInEvent{ "ZoomIn" };
-        constexpr std::string_view kZoomOutEvent{ "ZoomOut" };
         constexpr std::int32_t kMouseWheelUp{ 0x800 };
         constexpr std::int32_t kMouseWheelDown{ 0x900 };
 
         // PlayerControls::Manager is the first normal receiver on Starfield 1.16.244.
-        // Toggle keys are consumed there before vanilla can claim them.
+        // Right-stick clicks are consumed there before vanilla can claim them.
         constexpr std::size_t kPlayerControlsInputVtable = 8;
         constexpr std::size_t kUIInputVtable = 10;
         constexpr std::size_t kPerformInputProcessingSlot = 1;
@@ -66,61 +63,20 @@ namespace ToggleDialogueCameraSF::Input
             if (a_button.idCode == kMouseWheelDown) {
                 return MouseWheelDirection::kOut;
             }
-
-            const auto userEvent = std::string_view{ a_button.QUserEvent().c_str() };
-            if (userEvent == kZoomInEvent) {
-                return MouseWheelDirection::kIn;
-            }
-            if (userEvent == kZoomOutEvent) {
-                return MouseWheelDirection::kOut;
-            }
             return MouseWheelDirection::kNone;
         }
 
-        [[nodiscard]] bool IsConfiguredToggleInput(const RE::ButtonEvent& a_button)
+        [[nodiscard]] bool IsRightStickClick(const RE::ButtonEvent& a_button)
         {
-            const auto& config = Settings::Get();
-            if (a_button.deviceType == RE::InputEvent::DeviceType::kKeyboard) {
-                return config.keyboardToggleKey >= 0 && a_button.idCode == config.keyboardToggleKey;
-            }
-            if (a_button.deviceType == RE::InputEvent::DeviceType::kGamepad) {
-                return config.gamepadToggleKey >= 0 && a_button.idCode == config.gamepadToggleKey;
-            }
-            return false;
+            return a_button.deviceType == RE::InputEvent::DeviceType::kGamepad &&
+                   a_button.idCode == REX::W32::XINPUT_GAMEPAD_RIGHT_THUMB;
         }
 
-        [[nodiscard]] bool IsToggleInput(const RE::ButtonEvent& a_button)
-        {
-            if (a_button.deviceType != RE::InputEvent::DeviceType::kKeyboard &&
-                a_button.deviceType != RE::InputEvent::DeviceType::kGamepad) {
-                return false;
-            }
-            return IsConfiguredToggleInput(a_button) ||
-                   std::string_view{ a_button.QUserEvent().c_str() } == kTogglePOVEvent;
-        }
-
-        void LogKeyboardToggleCandidate(const RE::ButtonEvent& a_button)
-        {
-            if (a_button.deviceType != RE::InputEvent::DeviceType::kKeyboard || !IsToggleInput(a_button)) {
-                return;
-            }
-
-            logger::info(
-                "Keyboard toggle candidate observed before PlayerControls: "
-                "id={}, event={}, time={}, status={}, value={}, held={}.",
-                a_button.idCode,
-                a_button.QUserEvent().c_str(),
-                a_button.timeCode,
-                std::to_underlying(a_button.status),
-                a_button.value,
-                a_button.heldDownSecs);
-        }
-
-        [[nodiscard]] bool ConsumeToggleInput(
+        [[nodiscard]] bool ConsumeRightStickClick(
             const RE::ButtonEvent* a_button,
             const bool a_toggleAlreadyRequested)
         {
-            if (!a_button || a_button->status == RE::InputEvent::Status::kStop || !IsToggleInput(*a_button)) {
+            if (!a_button || a_button->status == RE::InputEvent::Status::kStop || !IsRightStickClick(*a_button)) {
                 return false;
             }
 
@@ -129,37 +85,15 @@ namespace ToggleDialogueCameraSF::Input
             mutableButton->status = RE::InputEvent::Status::kStop;
 
             const bool initialPress = a_button->value != 0.0F && a_button->heldDownSecs == 0.0F;
-            if (!initialPress) {
-                logger::debug(
-                    "Toggle continuation stopped: device={}, id={}, event={}, time={}, prior status={}, value={}, held={}.",
-                    std::to_underlying(a_button->deviceType),
-                    a_button->idCode,
-                    a_button->QUserEvent().c_str(),
-                    a_button->timeCode,
-                    std::to_underlying(previousStatus),
-                    a_button->value,
-                    a_button->heldDownSecs);
-                return false;
-            }
-
-            if (a_toggleAlreadyRequested) {
-                logger::debug(
-                    "Additional toggle press in the same PlayerControls input queue was stopped: device={}, id={}, event={}.",
-                    std::to_underlying(a_button->deviceType),
-                    a_button->idCode,
-                    a_button->QUserEvent().c_str());
+            if (!initialPress || a_toggleAlreadyRequested) {
                 return false;
             }
 
             logger::info(
-                "Toggle input accepted before PlayerControls: device={}, id={}, event={}, time={}, prior status={}, value={}, held={}.",
-                std::to_underlying(a_button->deviceType),
-                a_button->idCode,
+                "Right-stick input accepted before PlayerControls: event={}, time={}, prior status={}.",
                 a_button->QUserEvent().c_str(),
                 a_button->timeCode,
-                std::to_underlying(previousStatus),
-                a_button->value,
-                a_button->heldDownSecs);
+                std::to_underlying(previousStatus));
             return true;
         }
 
@@ -169,16 +103,11 @@ namespace ToggleDialogueCameraSF::Input
                 auto event = a_queueHead;
                 std::size_t eventCount = 0;
                 bool toggleRequested = false;
-                bool cycleThirdPersonDistance = false;
                 while (event && eventCount < kMaximumQueueLength) {
                     if (event->eventType == RE::InputEvent::EventType::kButton) {
                         auto const button = static_cast<const RE::ButtonEvent*>(event);
-                        LogKeyboardToggleCandidate(*button);
-                        if (ConsumeToggleInput(button, toggleRequested)) {
+                        if (ConsumeRightStickClick(button, toggleRequested)) {
                             toggleRequested = true;
-                            cycleThirdPersonDistance =
-                                button->deviceType == RE::InputEvent::DeviceType::kGamepad &&
-                                IsConfiguredToggleInput(*button);
                         }
                     }
                     event = event->next;
@@ -191,7 +120,7 @@ namespace ToggleDialogueCameraSF::Input
                         kMaximumQueueLength);
                 }
                 if (toggleRequested) {
-                    DialogueCamera::Toggle(cycleThirdPersonDistance);
+                    DialogueCamera::Toggle();
                 }
             }
 
@@ -261,6 +190,7 @@ namespace ToggleDialogueCameraSF::Input
                 return false;
             }
 
+            // Publish the chain target before making this hook reachable.
             a_original = REX::UNRESTRICTED_CAST<InputProcessor>(originalAddress);
             const auto replacedAddress = a_vtable.write_vfunc(a_slot, a_hookAddress);
             const auto chainAddress = replacedAddress != 0 ? replacedAddress : originalAddress;

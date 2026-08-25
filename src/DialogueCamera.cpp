@@ -1,6 +1,5 @@
 #include "DialogueCamera.h"
 #include "Input.h"
-#include "Settings.h"
 
 namespace ToggleDialogueCameraSF::DialogueCamera
 {
@@ -217,45 +216,6 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             return true;
         }
 
-        void EnterAutomaticFirstPerson(RE::PlayerCamera& a_camera)
-        {
-            const bool fromDialogue = a_camera.QCameraEquals(RE::CameraState::kDialogue);
-            if (dialogueCameraEnabledAtOpen.load() && !SuppressDialogueCamera("automatic dialogue entry")) {
-                logger::error("Automatic first-person entry was cancelled because dialogue-camera suppression failed.");
-                return;
-            }
-
-            if (!a_camera.IsInFirstPerson() && !SelectFirstPerson(a_camera, fromDialogue)) {
-                logger::error("Automatic first-person entry failed; camera remained {}.", CameraStateName(a_camera));
-                if (!RestoreDialogueCameraSetting("failed automatic dialogue entry")) {
-                    logger::critical("Automatic entry failure also left the runtime setting unrestored.");
-                }
-                return;
-            }
-
-            logger::info(
-                "Automatic dialogue entry selected {}; runtime gate={}.",
-                CameraStateName(a_camera),
-                dialogueCameraSetting->GetBool());
-        }
-
-        void ExitAutomaticFirstPerson(RE::PlayerCamera& a_camera)
-        {
-            const bool fromDialogue = a_camera.QCameraEquals(RE::CameraState::kDialogue);
-            if (fromDialogue && dialogueCameraEnabledAtOpen.load() &&
-                !SuppressDialogueCamera("automatic dialogue exit")) {
-                logger::error("Automatic third-person exit was cancelled because dialogue-camera suppression failed.");
-                return;
-            }
-
-            if (!a_camera.IsInThirdPerson() && !SelectThirdPerson(a_camera, fromDialogue)) {
-                logger::error("Automatic third-person exit failed; camera remained {}.", CameraStateName(a_camera));
-                return;
-            }
-
-            logger::info("Automatic dialogue exit selected {}.", CameraStateName(a_camera));
-        }
-
         [[nodiscard]] bool IsNonTerminalSave(const RE::SaveLoadEvent::OpType a_operation)
         {
             using OpType = RE::SaveLoadEvent::OpType;
@@ -462,29 +422,20 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                     dialogueOpen.store(true);
 
                     logger::info(
-                        "DialogueMenu opened: camera={}, dialogue camera setting={}, auto={}.",
+                        "DialogueMenu opened: camera={}, dialogue camera setting={}.",
                         CameraStateName(*camera),
-                        settingEnabled,
-                        Settings::Get().autoToggle);
-
-                    if (Settings::Get().autoToggle) {
-                        EnterAutomaticFirstPerson(*camera);
-                    }
+                        settingEnabled);
                 } else {
                     dialogueOpen.store(false);
                     pauseMenuOpen.store(false);
                     resumeAfterSave.store(ResumeView::kNone);
                     resumeAfterPause.store(ResumeView::kNone);
                     logger::info(
-                        "DialogueMenu closed: camera={}, dialogue camera setting={}, override={}, auto={}.",
+                        "DialogueMenu closed: camera={}, dialogue camera setting={}, override={}.",
                         CameraStateName(*camera),
                         dialogueCameraSetting->GetBool(),
-                        dialogueCameraOverrideActive.load(),
-                        Settings::Get().autoToggle);
+                        dialogueCameraOverrideActive.load());
 
-                    if (Settings::Get().autoToggle) {
-                        ExitAutomaticFirstPerson(*camera);
-                    }
                     if (!RestoreDialogueCameraSetting("DialogueMenu close")) {
                         return RE::BSEventNotifyControl::kContinue;
                     }
@@ -533,7 +484,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         return false;
     }
 
-    void Toggle(const bool a_cycleThirdPersonDistance)
+    void Toggle()
     {
         if (!dialogueOpen.load()) {
             return;
@@ -558,42 +509,35 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                 }
                 target = "near third person";
             } else if (wasThirdPerson) {
-                if (a_cycleThirdPersonDistance) {
-                    auto const thirdPersonState = camera->GetThirdPersonState();
-                    if (!thirdPersonState) {
-                        logger::error("Gamepad third-person cycle failed because ThirdPersonState is unavailable.");
+                auto const thirdPersonState = camera->GetThirdPersonState();
+                if (!thirdPersonState) {
+                    logger::error("Third-person cycle failed because ThirdPersonState is unavailable.");
+                    return;
+                }
+
+                if (!thirdPersonState->IsCameraNearFarMode()) {
+                    const bool overrideWasActive = dialogueCameraOverrideActive.load();
+                    if (!SuppressDialogueCamera("manual near-third-person-to-far-third-person toggle")) {
                         return;
                     }
 
-                    if (!thirdPersonState->IsCameraNearFarMode()) {
-                        const bool overrideWasActive = dialogueCameraOverrideActive.load();
-                        if (!SuppressDialogueCamera("manual near-third-person-to-far-third-person toggle")) {
-                            return;
+                    thirdPersonState->EnableCameraNearFarMode();
+                    const bool farModeEnabled = thirdPersonState->IsCameraNearFarMode();
+                    if (!camera->IsInThirdPerson() || !farModeEnabled) {
+                        logger::error(
+                            "Near-to-far third-person transition failed: camera={}, CameraNearFar mode={}.",
+                            CameraStateName(*camera),
+                            farModeEnabled);
+                        if (!overrideWasActive &&
+                            !RestoreDialogueCameraSetting("failed near-to-far third-person toggle")) {
+                            logger::critical(
+                                "Failed far-camera transition also left the runtime setting unrestored.");
                         }
-
-                        thirdPersonState->EnableCameraNearFarMode();
-                        const bool farModeEnabled = thirdPersonState->IsCameraNearFarMode();
-                        if (!camera->IsInThirdPerson() || !farModeEnabled) {
-                            logger::error(
-                                "Near-to-far third-person transition failed: camera={}, CameraNearFar mode={}.",
-                                CameraStateName(*camera),
-                                farModeEnabled);
-                            if (!overrideWasActive &&
-                                !RestoreDialogueCameraSetting("failed near-to-far third-person toggle")) {
-                                logger::critical(
-                                    "Failed far-camera transition also left the runtime setting unrestored.");
-                            }
-                            return;
-                        }
-                        target = "far third person";
-                    } else {
-                        if (!EnterDialogueCamera(*camera, "manual far-third-person-to-dialogue toggle")) {
-                            return;
-                        }
-                        target = "dialogue camera";
+                        return;
                     }
+                    target = "far third person";
                 } else {
-                    if (!EnterDialogueCamera(*camera, "manual third-person-to-dialogue toggle")) {
+                    if (!EnterDialogueCamera(*camera, "manual far-third-person-to-dialogue toggle")) {
                         return;
                     }
                     target = "dialogue camera";
@@ -654,8 +598,6 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             logger::warn("Dialogue camera installation was already attempted.");
             return false;
         }
-
-        Settings::Load();
 
         auto const ui = RE::UI::GetSingleton();
         if (!ui) {
