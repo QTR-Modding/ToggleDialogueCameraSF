@@ -133,7 +133,9 @@ namespace ToggleDialogueCameraSF::Input
                     DialogueCamera::Toggle();
                 } else if (firstMouseWheelInput) {
                     const auto direction = GetMouseWheelDirection(*firstMouseWheelInput);
-                    if (DialogueCamera::HandleMouseWheel(direction == MouseWheelDirection::kIn)) {
+                    const bool zoomIn = direction == MouseWheelDirection::kIn;
+                    if (DialogueCamera::HandleDisabledMouseWheel(zoomIn) ||
+                        DialogueCamera::HandleMouseWheel(zoomIn)) {
                         auto* const mutableMouseWheelInput = const_cast<RE::ButtonEvent*>(firstMouseWheelInput);
                         const auto previousStatus = mutableMouseWheelInput->status;
                         mutableMouseWheelInput->status = RE::InputEvent::Status::kStop;
@@ -163,9 +165,10 @@ namespace ToggleDialogueCameraSF::Input
                 direction = GetMouseWheelDirection(*a_button);
                 stopAfterThirdPerson =
                     direction != MouseWheelDirection::kNone &&
-                    DialogueCamera::ShouldStopMouseWheelAfterThirdPerson(
-                        *a_state,
-                        direction == MouseWheelDirection::kIn);
+                    (DialogueCamera::ShouldStopDisabledMouseWheelAfterThirdPerson(*a_state) ||
+                     DialogueCamera::ShouldStopMouseWheelAfterThirdPerson(
+                         *a_state,
+                         direction == MouseWheelDirection::kIn));
             }
 
             originalThirdPersonButtonInput(a_state, a_button);

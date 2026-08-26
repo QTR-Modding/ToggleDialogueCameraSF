@@ -463,6 +463,58 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         return dialogueOpen.load();
     }
 
+    bool HandleDisabledMouseWheel(const bool a_zoomIn)
+    {
+        if (!dialogueOpen.load() || dialogueCameraEnabledAtOpen.load()) {
+            return false;
+        }
+
+        auto const camera = RE::PlayerCamera::GetSingleton();
+        if (!camera) {
+            logger::warn("Disabled-mode mouse-wheel input received, but PlayerCamera is unavailable.");
+            return false;
+        }
+
+        // Let the active ThirdPersonState perform one native directional step.
+        // The post-dispatch hook stops the event before another receiver sees it.
+        if (camera->IsInThirdPerson()) {
+            return false;
+        }
+
+        if (camera->IsInFirstPerson() && a_zoomIn) {
+            return true;
+        }
+
+        const bool fromDialogue = camera->QCameraEquals(RE::CameraState::kDialogue);
+        const bool selected = a_zoomIn ?
+                                  SelectFirstPerson(*camera, fromDialogue) :
+                                  SelectThirdPerson(*camera, fromDialogue);
+        if (!selected) {
+            logger::error(
+                "Disabled-mode mouse transition failed: direction={}, camera remained {}.",
+                a_zoomIn ? "in" : "out",
+                CameraStateName(*camera));
+        } else {
+            logger::info(
+                "Disabled-mode mouse zoom-{} selected {}.",
+                a_zoomIn ? "in" : "out",
+                CameraStateName(*camera));
+        }
+        return true;
+    }
+
+    bool ShouldStopDisabledMouseWheelAfterThirdPerson(const RE::ThirdPersonState& a_state)
+    {
+        if (!dialogueOpen.load() || dialogueCameraEnabledAtOpen.load()) {
+            return false;
+        }
+
+        auto const camera = RE::PlayerCamera::GetSingleton();
+        return camera &&
+               camera->IsInThirdPerson() &&
+               camera->GetThirdPersonState() == &a_state;
+    }
+
     bool HandleMouseWheel(const bool a_zoomIn)
     {
         if (!dialogueOpen.load() || !dialogueCameraEnabledAtOpen.load()) {
@@ -604,13 +656,31 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                 logger::error("First-to-third-person toggle failed; camera remained {}.", CameraStateName(*camera));
                 return;
             }
-            target = "third person";
+            target = "near third person";
         } else if (wasThirdPerson) {
-            if (!SelectFirstPerson(*camera, false)) {
-                logger::error("Third-to-first-person toggle failed; camera remained {}.", CameraStateName(*camera));
+            auto const thirdPersonState = camera->GetThirdPersonState();
+            if (!thirdPersonState) {
+                logger::error("Disabled-mode third-person cycle failed because ThirdPersonState is unavailable.");
                 return;
             }
-            target = "first person";
+
+            if (!IsFarThirdPerson(*thirdPersonState)) {
+                thirdPersonState->EnableCameraNearFarMode();
+                if (!camera->IsInThirdPerson() || !IsFarThirdPerson(*thirdPersonState)) {
+                    logger::error(
+                        "Disabled-mode near-to-far-third-person toggle failed: camera={}, target zoom={}.",
+                        CameraStateName(*camera),
+                        thirdPersonState->GetCameraTargetZoom());
+                    return;
+                }
+                target = "far third person";
+            } else {
+                if (!SelectFirstPerson(*camera, false)) {
+                    logger::error("Far-third-to-first-person toggle failed; camera remained {}.", CameraStateName(*camera));
+                    return;
+                }
+                target = "first person";
+            }
         } else if (wasDialogueCamera) {
             if (!SelectThirdPerson(*camera, true)) {
                 logger::error("Unexpected dialogue-to-third-person toggle failed; camera remained {}.", CameraStateName(*camera));
