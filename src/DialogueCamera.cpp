@@ -56,6 +56,37 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             return !IsFarThirdPerson(a_state);
         }
 
+        void PreserveNearThirdPersonOnDialogueExit(RE::PlayerCamera& a_camera)
+        {
+            if (!dialogueCameraEnabledAtOpen.load() ||
+                !a_camera.QCameraEquals(RE::CameraState::kDialogue)) {
+                return;
+            }
+
+            auto const thirdPersonState = a_camera.GetThirdPersonState();
+            auto const dialogueCameraState = a_camera.GetDialogueCameraState();
+            if (!thirdPersonState || !dialogueCameraState) {
+                logger::error(
+                    "Could not preserve the dialogue entry distance because a camera state is unavailable.");
+                return;
+            }
+
+            const float targetZoom = thirdPersonState->GetCameraTargetZoom();
+            if (!std::isfinite(targetZoom)) {
+                logger::error(
+                    "Could not preserve the dialogue entry distance because the third-person target zoom is invalid.");
+                return;
+            }
+
+            if (targetZoom < kFarThirdPersonTargetZoom &&
+                dialogueCameraState->IsCameraNearFarMode()) {
+                dialogueCameraState->cameraNearFarMode = false;
+                logger::info(
+                    "Preserved near third person for dialogue exit: target zoom={}.",
+                    targetZoom);
+            }
+        }
+
         [[nodiscard]] const char* CameraStateName(const RE::PlayerCamera& a_camera)
         {
             if (a_camera.IsInFirstPerson()) {
@@ -456,6 +487,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
                         CameraStateName(*camera),
                         settingEnabled);
                 } else {
+                    PreserveNearThirdPersonOnDialogueExit(*camera);
                     dialogueOpen.store(false);
                     pauseMenuOpen.store(false);
                     resumeAfterSave.store(ResumeView::kNone);
