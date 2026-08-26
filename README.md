@@ -27,7 +27,7 @@ Copy `ToggleDialogueCameraSF.dll` into `Data\SFSE\Plugins`.
 4. Disable Dialogue Camera in Starfield's Accessibility settings, start another dialogue, and confirm the View button cycles First Person → Near Third Person → Far Third Person → First Person.
 5. In the same disabled-mode dialogue, scroll out from First Person through Near and Far Third Person, then scroll back in to First Person. Confirm each notch performs one smooth transition and each terminal notch leaves the endpoint unchanged.
 6. End dialogue from First Person, both third-person distances, and the dialogue camera. Confirm movement and camera-look work, then immediately activate the same NPC again.
-7. Confirm each deliberate View-button press logs one `View-button input accepted` line and one `Dialogue toggle` line. Boundary and terminal mouse events log `Mouse dialogue-view input consumed before PlayerControls`; native third-person steps log `Mouse middle-distance input stopped after one ThirdPersonState dispatch`.
+7. Confirm each deliberate View-button press logs one `View-button input accepted` line and one `Dialogue toggle` line. Boundary and terminal mouse events log `Mouse dialogue-view input consumed before PlayerControls`; enabled-mode native third-person steps log `Mouse middle-distance input stopped after one ThirdPersonState dispatch`.
 
 The SFSE log is written to `Documents\My Games\Starfield\SFSE\Logs\Toggle Dialogue Camera SF.log`.
 
@@ -44,7 +44,7 @@ xmake -y
 ```
 
 Binary recipients can instead extract the accompanying
-`ToggleDialogueCameraSF-v0.16.0-source.zip` and run the two Xmake commands from
+`ToggleDialogueCameraSF-v0.17.0-source.zip` and run the two Xmake commands from
 its project root. The archive already contains the expanded dependency source
 trees and does not require access to the private Git repository.
 

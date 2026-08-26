@@ -11,9 +11,9 @@ these exact revisions:
   `486b55554f11c9cccc913e11a87085b2a91f706f`
 
 The Git repository pins all three source trees as submodules. Because GitHub's
-automatic source archives do not expand submodules, every distributed v0.16.0
+automatic source archives do not expand submodules, every distributed v0.17.0
 binary must be accompanied at the same download location by
-`ToggleDialogueCameraSF-v0.16.0-source.zip`. That archive contains the complete
+`ToggleDialogueCameraSF-v0.17.0-source.zip`. That archive contains the complete
 project source and build scripts plus expanded source trees for all three
 linked dependencies. Access to the private Git repository is not required to
 obtain that archive.

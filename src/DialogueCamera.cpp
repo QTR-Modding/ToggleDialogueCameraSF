@@ -1,6 +1,8 @@
 #include "DialogueCamera.h"
 #include "Input.h"
 
+#include <cmath>
+
 namespace ToggleDialogueCameraSF::DialogueCamera
 {
     namespace
@@ -9,6 +11,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         constexpr std::string_view kMainMenuName{ "MainMenu" };
         constexpr std::string_view kPauseMenuName{ "PauseMenu" };
         constexpr std::string_view kDialogueCameraSettingName{ "bDialogueEnable:Interface" };
+        constexpr std::string_view kMinCurrentZoomSettingName{ "fMinCurrentZoom:Camera" };
         constexpr float kFarThirdPersonTargetZoom{ 1.0F };
 
         enum class ResumeView : std::uint8_t
@@ -26,11 +29,31 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         std::atomic<ResumeView> resumeAfterPause{ ResumeView::kNone };
         std::atomic_bool installAttempted{ false };
         RE::Setting* dialogueCameraSetting{ nullptr };
+        RE::Setting* minCurrentZoomSetting{ nullptr };
 
         [[nodiscard]] bool IsFarThirdPerson(const RE::ThirdPersonState& a_state)
         {
             return a_state.IsCameraNearFarMode() &&
                    a_state.GetCameraTargetZoom() >= kFarThirdPersonTargetZoom;
+        }
+
+        [[nodiscard]] bool SelectNearThirdPerson(RE::ThirdPersonState& a_state)
+        {
+            if (!minCurrentZoomSetting || !minCurrentZoomSetting->Is<float>()) {
+                logger::error("The native minimum third-person zoom setting is unavailable.");
+                return false;
+            }
+
+            const float targetZoom = minCurrentZoomSetting->GetFloat();
+            if (!std::isfinite(targetZoom) || targetZoom >= kFarThirdPersonTargetZoom) {
+                logger::error("The native minimum third-person zoom target {} is invalid.", targetZoom);
+                return false;
+            }
+
+            // Native wheel zoom selects the near stage by changing only this target;
+            // ThirdPersonState then performs the normal smooth interpolation.
+            a_state.cameraTargetZoom = targetZoom;
+            return !IsFarThirdPerson(a_state);
         }
 
         [[nodiscard]] const char* CameraStateName(const RE::PlayerCamera& a_camera)
@@ -463,18 +486,6 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         return dialogueOpen.load();
     }
 
-    bool ShouldRouteDisabledMouseWheelThroughThirdPerson()
-    {
-        if (!dialogueOpen.load() || dialogueCameraEnabledAtOpen.load()) {
-            return false;
-        }
-
-        auto const camera = RE::PlayerCamera::GetSingleton();
-        return camera &&
-               camera->IsInThirdPerson() &&
-               camera->GetThirdPersonState();
-    }
-
     bool HandleDisabledMouseWheel(const bool a_zoomIn)
     {
         if (!dialogueOpen.load() || dialogueCameraEnabledAtOpen.load()) {
@@ -487,44 +498,61 @@ namespace ToggleDialogueCameraSF::DialogueCamera
             return false;
         }
 
-        // Let the active ThirdPersonState perform one native directional step.
-        // The post-dispatch hook stops the event before another receiver sees it.
-        if (camera->IsInThirdPerson()) {
-            return false;
-        }
-
-        if (camera->IsInFirstPerson() && a_zoomIn) {
+        if (camera->IsInFirstPerson()) {
+            if (!a_zoomIn) {
+                if (!SelectThirdPerson(*camera, false)) {
+                    logger::error(
+                        "Disabled-mode mouse First-to-Near transition failed; camera remained {}.",
+                        CameraStateName(*camera));
+                } else {
+                    logger::info("Disabled-mode mouse zoom-out selected near third person.");
+                }
+            }
             return true;
         }
 
-        const bool fromDialogue = camera->QCameraEquals(RE::CameraState::kDialogue);
-        const bool selected = a_zoomIn ?
-                                  SelectFirstPerson(*camera, fromDialogue) :
-                                  SelectThirdPerson(*camera, fromDialogue);
-        if (!selected) {
-            logger::error(
-                "Disabled-mode mouse transition failed: direction={}, camera remained {}.",
-                a_zoomIn ? "in" : "out",
+        if (!camera->IsInThirdPerson()) {
+            logger::warn(
+                "Disabled-mode mouse input was consumed in unexpected camera state {}.",
                 CameraStateName(*camera));
-        } else {
-            logger::info(
-                "Disabled-mode mouse zoom-{} selected {}.",
-                a_zoomIn ? "in" : "out",
-                CameraStateName(*camera));
+            return true;
         }
+
+        auto const thirdPersonState = camera->GetThirdPersonState();
+        if (!thirdPersonState) {
+            logger::error("Disabled-mode mouse transition failed because ThirdPersonState is unavailable.");
+            return true;
+        }
+
+        const bool farThirdPerson = IsFarThirdPerson(*thirdPersonState);
+        if (a_zoomIn) {
+            if (farThirdPerson) {
+                if (!SelectNearThirdPerson(*thirdPersonState)) {
+                    logger::error(
+                        "Disabled-mode mouse Far-to-Near transition failed: target zoom={}.",
+                        thirdPersonState->GetCameraTargetZoom());
+                } else {
+                    logger::info("Disabled-mode mouse zoom-in selected near third person.");
+                }
+            } else if (!SelectFirstPerson(*camera, false)) {
+                logger::error(
+                    "Disabled-mode mouse Near-to-First transition failed; camera remained {}.",
+                    CameraStateName(*camera));
+            } else {
+                logger::info("Disabled-mode mouse zoom-in selected first person.");
+            }
+        } else if (!farThirdPerson) {
+            thirdPersonState->EnableCameraNearFarMode();
+            if (!IsFarThirdPerson(*thirdPersonState)) {
+                logger::error(
+                    "Disabled-mode mouse Near-to-Far transition failed: target zoom={}.",
+                    thirdPersonState->GetCameraTargetZoom());
+            } else {
+                logger::info("Disabled-mode mouse zoom-out selected far third person.");
+            }
+        }
+
         return true;
-    }
-
-    bool ShouldStopDisabledMouseWheelAfterThirdPerson(const RE::ThirdPersonState& a_state)
-    {
-        if (!dialogueOpen.load() || dialogueCameraEnabledAtOpen.load()) {
-            return false;
-        }
-
-        auto const camera = RE::PlayerCamera::GetSingleton();
-        return camera &&
-               camera->IsInThirdPerson() &&
-               camera->GetThirdPersonState() == &a_state;
     }
 
     bool HandleMouseWheel(const bool a_zoomIn)
@@ -741,6 +769,13 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         if (!dialogueCameraSetting || !dialogueCameraSetting->Is<bool>()) {
             logger::error("Could not resolve {} as a Boolean INI preference.", kDialogueCameraSettingName);
             dialogueCameraSetting = nullptr;
+            return false;
+        }
+
+        minCurrentZoomSetting = RE::GetINISetting(kMinCurrentZoomSettingName);
+        if (!minCurrentZoomSetting || !minCurrentZoomSetting->Is<float>()) {
+            logger::error("Could not resolve {} as a floating-point camera setting.", kMinCurrentZoomSettingName);
+            minCurrentZoomSetting = nullptr;
             return false;
         }
 

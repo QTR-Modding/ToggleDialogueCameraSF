@@ -68,36 +68,6 @@ namespace ToggleDialogueCameraSF::Input
             return MouseWheelDirection::kNone;
         }
 
-        [[nodiscard]] bool TemporarilyExposeDisabledMouseWheel(
-            RE::ButtonEvent& a_button,
-            const MouseWheelDirection a_direction)
-        {
-            if (!DialogueCamera::ShouldRouteDisabledMouseWheelThroughThirdPerson() ||
-                a_direction == MouseWheelDirection::kNone ||
-                a_button.status != RE::InputEvent::Status::kUnhandled ||
-                !a_button.disabled) {
-                return false;
-            }
-
-            const std::string_view expectedEvent =
-                a_direction == MouseWheelDirection::kIn ? "ZoomIn" : "ZoomOut";
-            if (a_button.strUserEvent != expectedEvent) {
-                logger::error(
-                    "Disabled-mode mouse input retained its mask because the underlying event was {}, expected {}.",
-                    a_button.strUserEvent.c_str(),
-                    expectedEvent);
-                return false;
-            }
-
-            a_button.disabled = false;
-            logger::info(
-                "Exposed disabled-mode mouse input for one native ThirdPersonState dispatch: "
-                "direction={}, mapped event={}.",
-                a_direction == MouseWheelDirection::kIn ? "in" : "out",
-                a_button.strUserEvent.c_str());
-            return true;
-        }
-
         [[nodiscard]] bool IsViewButton(const RE::ButtonEvent& a_button)
         {
             // XInput's legacy BACK name is the Xbox View button (two overlapping rectangles).
@@ -132,7 +102,6 @@ namespace ToggleDialogueCameraSF::Input
 
         void ProcessPlayerControlsInput(RE::BSInputEventReceiver* a_receiver, const RE::InputEvent* a_queueHead)
         {
-            RE::ButtonEvent* temporarilyExposedMouseWheelInput = nullptr;
             if (DialogueCamera::IsOpen()) {
                 auto event = a_queueHead;
                 std::size_t eventCount = 0;
@@ -179,21 +148,11 @@ namespace ToggleDialogueCameraSF::Input
                             firstMouseWheelInput->QUserEvent().c_str(),
                             firstMouseWheelInput->timeCode,
                             std::to_underlying(previousStatus));
-                    } else if (TemporarilyExposeDisabledMouseWheel(*mutableMouseWheelInput, direction)) {
-                        temporarilyExposedMouseWheelInput = mutableMouseWheelInput;
                     }
                 }
             }
 
             originalPlayerControlsInput(a_receiver, a_queueHead);
-
-            if (temporarilyExposedMouseWheelInput) {
-                temporarilyExposedMouseWheelInput->disabled = true;
-                logger::debug(
-                    "Restored the disabled-mode mouse input mask after PlayerControls: mapped event={}, status={}.",
-                    temporarilyExposedMouseWheelInput->strUserEvent.c_str(),
-                    std::to_underlying(temporarilyExposedMouseWheelInput->status));
-            }
         }
 
         void ProcessThirdPersonButtonInput(RE::ThirdPersonState* a_state, const RE::ButtonEvent* a_button)
@@ -206,10 +165,9 @@ namespace ToggleDialogueCameraSF::Input
                 direction = GetMouseWheelDirection(*a_button);
                 stopAfterThirdPerson =
                     direction != MouseWheelDirection::kNone &&
-                    (DialogueCamera::ShouldStopDisabledMouseWheelAfterThirdPerson(*a_state) ||
-                     DialogueCamera::ShouldStopMouseWheelAfterThirdPerson(
-                         *a_state,
-                         direction == MouseWheelDirection::kIn));
+                    DialogueCamera::ShouldStopMouseWheelAfterThirdPerson(
+                        *a_state,
+                        direction == MouseWheelDirection::kIn);
             }
 
             originalThirdPersonButtonInput(a_state, a_button);
