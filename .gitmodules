@@ -1,0 +1,7 @@
+[submodule "lib/commonlibsf"]
+	path = lib/commonlibsf
+	url = https://github.com/QTR-Modding/commonlibsf.git
+	branch = main
+[submodule "external/spdlog"]
+	path = external/spdlog
+	url = https://github.com/gabime/spdlog.git

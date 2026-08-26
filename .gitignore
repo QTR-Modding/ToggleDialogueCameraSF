@@ -1,0 +1,6 @@
+
+.vs/
+.xmake/
+build/
+*.vcxproj
+/vsxmake2026
