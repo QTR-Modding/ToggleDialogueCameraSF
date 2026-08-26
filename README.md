@@ -44,7 +44,7 @@ xmake -y
 ```
 
 Binary recipients can instead extract the accompanying
-`ToggleDialogueCameraSF-v0.15.0-source.zip` and run the two Xmake commands from
+`ToggleDialogueCameraSF-v0.16.0-source.zip` and run the two Xmake commands from
 its project root. The archive already contains the expanded dependency source
 trees and does not require access to the private Git repository.
 

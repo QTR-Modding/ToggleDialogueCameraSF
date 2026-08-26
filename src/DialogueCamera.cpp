@@ -463,6 +463,18 @@ namespace ToggleDialogueCameraSF::DialogueCamera
         return dialogueOpen.load();
     }
 
+    bool ShouldRouteDisabledMouseWheelThroughThirdPerson()
+    {
+        if (!dialogueOpen.load() || dialogueCameraEnabledAtOpen.load()) {
+            return false;
+        }
+
+        auto const camera = RE::PlayerCamera::GetSingleton();
+        return camera &&
+               camera->IsInThirdPerson() &&
+               camera->GetThirdPersonState();
+    }
+
     bool HandleDisabledMouseWheel(const bool a_zoomIn)
     {
         if (!dialogueOpen.load() || dialogueCameraEnabledAtOpen.load()) {
