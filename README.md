@@ -31,11 +31,6 @@ xmake f -m release -a x64 -y
 xmake -y
 ```
 
-Binary recipients can instead extract the accompanying
-`ToggleDialogueCameraSF-v1.0.0-source.zip` and run the two Xmake commands from
-its project root. The archive already contains the expanded dependency source
-trees and does not require Git repository access.
-
 The build requires Xmake 3.0.9 or newer, MSVC with C++23 support, and the
 Windows SDK. Exact dependency revisions and corresponding-source details are
 listed in [SOURCE.md](SOURCE.md).

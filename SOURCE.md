@@ -10,13 +10,21 @@ these exact revisions:
 - [spdlog](https://github.com/gabime/spdlog) v1.16.0, commit
   `486b55554f11c9cccc913e11a87085b2a91f706f`
 
-The Git repository pins all three source trees as submodules. Because GitHub's
-automatic source archives do not expand submodules, every distributed v1.0.0
-binary must be accompanied at the same download location by
-`ToggleDialogueCameraSF-v1.0.0-source.zip`. That archive contains the complete
-project source and build scripts plus expanded source trees for all three
-linked dependencies. Git repository access is not required to
-obtain that archive.
+The public Git repository provides the corresponding source and pins all three
+dependency source trees as submodules. Clone it recursively to obtain the
+project and the exact dependency revisions used by the binary:
+
+```powershell
+git clone --recursive https://github.com/QTR-Modding/ToggleDialogueCameraSF.git
+```
+
+GitHub's automatic source archives do not expand submodules and are not the
+complete corresponding source by themselves. In an existing clone, retrieve
+the pinned dependency trees with:
+
+```powershell
+git submodule update --init --recursive
+```
 
 Build instructions are in [README.md](README.md). Complete license, exception,
 and third-party notice texts are in `COPYING`, `EXCEPTIONS`, `LICENSES/`, and
