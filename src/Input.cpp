@@ -88,7 +88,7 @@ namespace ToggleDialogueCameraSF::Input
 				return false;
 			}
 
-			auto* const mutableButton = const_cast<RE::ButtonEvent*>(a_button);
+			auto const mutableButton = const_cast<RE::ButtonEvent*>(a_button);
 			const auto previousStatus = mutableButton->status;
 			mutableButton->status = RE::InputEvent::Status::kStop;
 
@@ -149,7 +149,7 @@ namespace ToggleDialogueCameraSF::Input
 				{
 					const auto direction = GetMouseWheelDirection(*firstMouseWheelInput);
 					const bool zoomIn = direction == MouseWheelDirection::kIn;
-					auto* const mutableMouseWheelInput = const_cast<RE::ButtonEvent*>(firstMouseWheelInput);
+					auto const mutableMouseWheelInput = const_cast<RE::ButtonEvent*>(firstMouseWheelInput);
 					if (DialogueCamera::HandleDisabledMouseWheel(zoomIn) ||
 						DialogueCamera::HandleMouseWheel(zoomIn))
 					{
@@ -194,7 +194,7 @@ namespace ToggleDialogueCameraSF::Input
 				return;
 			}
 
-			auto* const mutableButton = const_cast<RE::ButtonEvent*>(a_button);
+			auto const mutableButton = const_cast<RE::ButtonEvent*>(a_button);
 			const auto previousStatus = mutableButton->status;
 			mutableButton->status = RE::InputEvent::Status::kStop;
 			logger::info(
