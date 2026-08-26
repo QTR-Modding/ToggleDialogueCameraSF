@@ -2,5 +2,5 @@
 
 namespace ToggleDialogueCameraSF::Input
 {
-    bool Install();
+	bool Install();
 }
