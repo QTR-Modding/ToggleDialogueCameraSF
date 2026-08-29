@@ -88,7 +88,7 @@ namespace ToggleDialogueCameraSF::Input
 				return false;
 			}
 
-			auto const mutableButton = const_cast<RE::ButtonEvent*>(a_button);
+			const auto mutableButton = const_cast<RE::ButtonEvent*>(a_button);
 			const auto previousStatus = mutableButton->status;
 			mutableButton->status = RE::InputEvent::Status::kStop;
 
@@ -108,7 +108,7 @@ namespace ToggleDialogueCameraSF::Input
 
 		void ProcessPlayerControlsInput(RE::BSInputEventReceiver* a_receiver, const RE::InputEvent* a_queueHead)
 		{
-			if (DialogueCamera::IsOpen())
+			if (DialogueCamera::IsDialogueViewInputAllowed())
 			{
 				auto event = a_queueHead;
 				std::size_t eventCount = 0;
@@ -149,7 +149,7 @@ namespace ToggleDialogueCameraSF::Input
 				{
 					const auto direction = GetMouseWheelDirection(*firstMouseWheelInput);
 					const bool zoomIn = direction == MouseWheelDirection::kIn;
-					auto const mutableMouseWheelInput = const_cast<RE::ButtonEvent*>(firstMouseWheelInput);
+					const auto mutableMouseWheelInput = const_cast<RE::ButtonEvent*>(firstMouseWheelInput);
 					if (DialogueCamera::HandleDisabledMouseWheel(zoomIn) ||
 						DialogueCamera::HandleMouseWheel(zoomIn))
 					{
@@ -194,7 +194,7 @@ namespace ToggleDialogueCameraSF::Input
 				return;
 			}
 
-			auto const mutableButton = const_cast<RE::ButtonEvent*>(a_button);
+			const auto mutableButton = const_cast<RE::ButtonEvent*>(a_button);
 			const auto previousStatus = mutableButton->status;
 			mutableButton->status = RE::InputEvent::Status::kStop;
 			logger::info(

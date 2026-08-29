@@ -4,9 +4,11 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 {
 	namespace
 	{
+		constexpr std::string_view kBarterMenuName{"BarterMenu"};
 		constexpr std::string_view kDialogueMenuName{"DialogueMenu"};
 		constexpr std::string_view kMainMenuName{"MainMenu"};
 		constexpr std::string_view kPauseMenuName{"PauseMenu"};
+		constexpr std::string_view kSpaceshipEditorMenuName{"SpaceshipEditorMenu"};
 		constexpr std::string_view kDialogueCameraSettingName{"bDialogueEnable:Interface"};
 		constexpr std::string_view kMinCurrentZoomSettingName{"fMinCurrentZoom:Camera"};
 		constexpr float kFarThirdPersonTargetZoom{1.0F};
@@ -551,9 +553,23 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		};
 	}
 
-	bool IsOpen()
+	bool IsDialogueViewInputAllowed()
 	{
-		return dialogueOpen.load();
+		if (!dialogueOpen.load() || pauseMenuOpen.load())
+		{
+			return false;
+		}
+
+		const auto ui = RE::UI::GetSingleton();
+		if (!ui)
+		{
+			return false;
+		}
+
+		static const RE::BSFixedString barterMenuName{kBarterMenuName};
+		static const RE::BSFixedString spaceshipEditorMenuName{kSpaceshipEditorMenuName};
+		return !ui->IsMenuOpen(barterMenuName) &&
+			!ui->IsMenuOpen(spaceshipEditorMenuName);
 	}
 
 	bool HandleDisabledMouseWheel(const bool a_zoomIn)
@@ -704,7 +720,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		const RE::ThirdPersonState& a_state,
 		const bool a_zoomIn)
 	{
-		if (!dialogueOpen.load() ||
+		if (!IsDialogueViewInputAllowed() ||
 			!dialogueCameraEnabledAtOpen.load() ||
 			!dialogueCameraOverrideActive.load())
 		{
