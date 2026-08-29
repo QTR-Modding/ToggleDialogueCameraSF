@@ -551,9 +551,21 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		};
 	}
 
-	bool IsOpen()
+	bool IsTopInputMenu()
 	{
-		return dialogueOpen.load();
+		if (!dialogueOpen.load())
+		{
+			return false;
+		}
+
+		const auto ui = RE::UI::GetSingleton();
+		if (!ui)
+		{
+			return false;
+		}
+
+		const auto topMenu = ui->GetTopInputMenu();
+		return topMenu && topMenu->menuName == kDialogueMenuName;
 	}
 
 	bool HandleDisabledMouseWheel(const bool a_zoomIn)
@@ -704,7 +716,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		const RE::ThirdPersonState& a_state,
 		const bool a_zoomIn)
 	{
-		if (!dialogueOpen.load() ||
+		if (!IsTopInputMenu() ||
 			!dialogueCameraEnabledAtOpen.load() ||
 			!dialogueCameraOverrideActive.load())
 		{
