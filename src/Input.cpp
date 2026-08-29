@@ -108,7 +108,7 @@ namespace ToggleDialogueCameraSF::Input
 
 		void ProcessPlayerControlsInput(RE::BSInputEventReceiver* a_receiver, const RE::InputEvent* a_queueHead)
 		{
-			if (DialogueCamera::IsTopInputMenu())
+			if (DialogueCamera::IsDialogueViewInputAllowed())
 			{
 				auto event = a_queueHead;
 				std::size_t eventCount = 0;

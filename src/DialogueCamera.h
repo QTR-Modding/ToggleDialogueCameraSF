@@ -3,7 +3,7 @@
 namespace ToggleDialogueCameraSF::DialogueCamera
 {
 	bool Install();
-	[[nodiscard]] bool IsTopInputMenu();
+	[[nodiscard]] bool IsDialogueViewInputAllowed();
 	[[nodiscard]] bool HandleDisabledMouseWheel(bool a_zoomIn);
 	[[nodiscard]] bool HandleMouseWheel(bool a_zoomIn);
 	[[nodiscard]] bool ShouldStopMouseWheelAfterThirdPerson(

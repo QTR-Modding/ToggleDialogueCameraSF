@@ -4,9 +4,11 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 {
 	namespace
 	{
+		constexpr std::string_view kBarterMenuName{"BarterMenu"};
 		constexpr std::string_view kDialogueMenuName{"DialogueMenu"};
 		constexpr std::string_view kMainMenuName{"MainMenu"};
 		constexpr std::string_view kPauseMenuName{"PauseMenu"};
+		constexpr std::string_view kSpaceshipEditorMenuName{"SpaceshipEditorMenu"};
 		constexpr std::string_view kDialogueCameraSettingName{"bDialogueEnable:Interface"};
 		constexpr std::string_view kMinCurrentZoomSettingName{"fMinCurrentZoom:Camera"};
 		constexpr float kFarThirdPersonTargetZoom{1.0F};
@@ -551,9 +553,9 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		};
 	}
 
-	bool IsTopInputMenu()
+	bool IsDialogueViewInputAllowed()
 	{
-		if (!dialogueOpen.load())
+		if (!dialogueOpen.load() || pauseMenuOpen.load())
 		{
 			return false;
 		}
@@ -564,8 +566,10 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 			return false;
 		}
 
-		const auto topMenu = ui->GetTopInputMenu();
-		return topMenu && topMenu->menuName == kDialogueMenuName;
+		static const RE::BSFixedString barterMenuName{kBarterMenuName};
+		static const RE::BSFixedString spaceshipEditorMenuName{kSpaceshipEditorMenuName};
+		return !ui->IsMenuOpen(barterMenuName) &&
+			!ui->IsMenuOpen(spaceshipEditorMenuName);
 	}
 
 	bool HandleDisabledMouseWheel(const bool a_zoomIn)
@@ -716,7 +720,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		const RE::ThirdPersonState& a_state,
 		const bool a_zoomIn)
 	{
-		if (!IsTopInputMenu() ||
+		if (!IsDialogueViewInputAllowed() ||
 			!dialogueCameraEnabledAtOpen.load() ||
 			!dialogueCameraOverrideActive.load())
 		{
