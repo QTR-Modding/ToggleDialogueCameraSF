@@ -19,6 +19,10 @@ Supports Dialogue Movement Enabler 1.1.0. Leave Dialogue Camera off in
 Settings > Accessibility to move during conversations while cycling camera
 views. Its optional POV-switch setting can be left off.
 
+With the matching [QTR live-camera DME build](https://github.com/QTR-Modding/DialogueMovementEnabler/tree/fix/live-dialogue-camera),
+switching to third person unlocks movement during the conversation. Returning
+to the dedicated dialogue camera locks movement again.
+
 ## Install
 
 Copy `ToggleDialogueCameraSF.dll` into `Data\SFSE\Plugins`.
