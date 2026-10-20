@@ -15,6 +15,10 @@ far-third-person end leaves the current view unchanged.
 - SFSE
 - Address Library for SFSE Plugins
 
+Supports Dialogue Movement Enabler 1.1.0. Leave Dialogue Camera off in
+Settings > Accessibility to move during conversations while cycling camera
+views. Its optional POV-switch setting can be left off.
+
 ## Install
 
 Copy `ToggleDialogueCameraSF.dll` into `Data\SFSE\Plugins`.
