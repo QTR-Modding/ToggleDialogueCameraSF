@@ -221,10 +221,12 @@ namespace ToggleDialogueCameraSF::Input
 			const std::array<std::uint8_t, N>& a_expectedPrologue,
 			Function& a_original,
 			const std::string_view a_name,
-			const Writer& a_writeHook)
+			const Writer& a_writeHook,
+			const std::uintptr_t a_verifiedOriginalAddress = 0)
 		{
 			const auto originalAddress = *reinterpret_cast<const std::uintptr_t*>(a_slotAddress);
-			if (!HasExpectedPrologue(originalAddress, a_expectedPrologue))
+			if (!HasExpectedPrologue(originalAddress, a_expectedPrologue) &&
+				(a_verifiedOriginalAddress == 0 || originalAddress != a_verifiedOriginalAddress))
 			{
 				logger::error("{} preflight failed; the input hook was not installed.", a_name);
 				return false;
@@ -321,13 +323,28 @@ namespace ToggleDialogueCameraSF::Input
 			playerControlsInputVtable.address() + sizeof(std::uintptr_t) * kPerformInputProcessingSlot;
 		auto playerControlsSlot = playerControlsVtableSlot;
 		const auto currentInput = *reinterpret_cast<const std::uintptr_t*>(playerControlsSlot);
+		std::uintptr_t verifiedInputHook = 0;
 		if (!HasExpectedPrologue(currentInput, kExpectedPlayerControlsInputPrologue))
 		{
-			playerControlsSlot = DialogueMovementEnabler::GetInputChainSlot(currentInput);
-			if (playerControlsSlot == 0)
+			const auto integration = DialogueMovementEnabler::GetInputHook(currentInput);
+			if (integration.chainSlot == 0)
 			{
 				logger::error("PlayerControls input target was not recognized; the input hook was not installed.");
 				return false;
+			}
+			if (integration.processCameraFirst)
+			{
+				const auto nativeInput = *reinterpret_cast<const std::uintptr_t*>(integration.chainSlot);
+				if (!HasExpectedPrologue(nativeInput, kExpectedPlayerControlsInputPrologue))
+				{
+					logger::error("Dialogue Movement Enabler's native input target failed preflight.");
+					return false;
+				}
+				verifiedInputHook = currentInput;
+			}
+			else
+			{
+				playerControlsSlot = integration.chainSlot;
 			}
 		}
 
@@ -341,9 +358,11 @@ namespace ToggleDialogueCameraSF::Input
 			const auto previousAddress = *reinterpret_cast<const std::uintptr_t*>(playerControlsSlot);
 			return {previousAddress, REL::WriteSafeData(playerControlsSlot, a_address)};
 		};
-		const std::string_view playerControlsHookName = playerControlsSlot == playerControlsVtableSlot
-			? "PlayerControls::Manager PerformInputProcessing hook"
-			: "Dialogue Movement Enabler input chain hook";
+		const std::string_view playerControlsHookName = verifiedInputHook != 0
+			? "PlayerControls input hook before Dialogue Movement Enabler"
+			: playerControlsSlot == playerControlsVtableSlot
+				? "PlayerControls::Manager PerformInputProcessing hook"
+				: "Dialogue Movement Enabler input chain hook";
 		const auto playerControlsHookAddress = REX::UNRESTRICTED_CAST<std::uintptr_t>(ProcessPlayerControlsInput);
 		if (!InstallHook(
 			playerControlsSlot,
@@ -351,7 +370,8 @@ namespace ToggleDialogueCameraSF::Input
 			kExpectedPlayerControlsInputPrologue,
 			originalPlayerControlsInput,
 			playerControlsHookName,
-			writePlayerControlsHook))
+			writePlayerControlsHook,
+			verifiedInputHook))
 		{
 			return false;
 		}
