@@ -11,7 +11,7 @@ includes(path.join(os.projectdir(), "lib", "commonlibsf"))
 
 local plugin_name = "Toggle Dialogue Camera SF"
 local dll_name = "ToggleDialogueCameraSF"
-local plugin_version = "1.0.1"
+local plugin_version = "1.0.2"
 local plugin_author = "Quantumyilmaz"
 
 set_project(plugin_name)
@@ -36,6 +36,6 @@ target(dll_name)
     })
     set_pcxxheader("src/PCH.h")
     add_defines("_SILENCE_CXX23_ALIGNED_STORAGE_DEPRECATION_WARNING")
-    add_files("src/plugin.cpp", "src/DialogueCamera.cpp", "src/Input.cpp")
-    add_headerfiles("src/PCH.h", "src/DialogueCamera.h", "src/Input.h")
+    add_files("src/plugin.cpp", "src/DialogueCamera.cpp", "src/Input.cpp", "src/DialogueMovementEnabler.cpp")
+    add_headerfiles("src/PCH.h", "src/DialogueCamera.h", "src/Input.h", "src/DialogueMovementEnabler.h")
     add_includedirs("src")

@@ -1,5 +1,6 @@
 #include "Input.h"
 #include "DialogueCamera.h"
+#include "DialogueMovementEnabler.h"
 #include "REX/W32/XINPUT.h"
 
 namespace ToggleDialogueCameraSF::Input
@@ -207,17 +208,22 @@ namespace ToggleDialogueCameraSF::Input
 				std::to_underlying(previousStatus));
 		}
 
-		template <class Function, std::size_t N>
-		[[nodiscard]] bool InstallVtableHook(
-			REL::Relocation<std::uintptr_t>& a_vtable,
-			const std::size_t a_slot,
+		struct HookWriteResult
+		{
+			std::uintptr_t previousAddress;
+			bool succeeded;
+		};
+
+		template <class Function, std::size_t N, class Writer>
+		[[nodiscard]] bool InstallHook(
+			const std::uintptr_t a_slotAddress,
 			const std::uintptr_t a_hookAddress,
 			const std::array<std::uint8_t, N>& a_expectedPrologue,
 			Function& a_original,
-			const std::string_view a_name)
+			const std::string_view a_name,
+			const Writer& a_writeHook)
 		{
-			const auto slotAddress = a_vtable.address() + sizeof(std::uintptr_t) * a_slot;
-			const auto originalAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
+			const auto originalAddress = *reinterpret_cast<const std::uintptr_t*>(a_slotAddress);
 			if (!HasExpectedPrologue(originalAddress, a_expectedPrologue))
 			{
 				logger::error("{} preflight failed; the input hook was not installed.", a_name);
@@ -226,30 +232,32 @@ namespace ToggleDialogueCameraSF::Input
 
 			// Publish the chain target before making this hook reachable.
 			a_original = REX::UNRESTRICTED_CAST<Function>(originalAddress);
-			const auto replacedAddress = a_vtable.write_vfunc(a_slot, a_hookAddress);
-			const auto chainAddress = replacedAddress != 0 ? replacedAddress : originalAddress;
+			const auto result = a_writeHook(a_hookAddress);
+			const auto chainAddress = result.previousAddress != 0 ? result.previousAddress : originalAddress;
 			a_original = REX::UNRESTRICTED_CAST<Function>(chainAddress);
 
-			const bool originalMatched = replacedAddress == originalAddress;
-			auto liveAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
+			const bool originalMatched = result.previousAddress == originalAddress;
+			auto liveAddress = *reinterpret_cast<const std::uintptr_t*>(a_slotAddress);
 			const bool hookMatched = liveAddress == a_hookAddress;
-			if (!originalMatched || !hookMatched)
+			if (!result.succeeded || !originalMatched || !hookMatched)
 			{
 				const bool rollbackAttempted = liveAddress == a_hookAddress;
+				bool rollbackWriteSucceeded = false;
 				if (rollbackAttempted)
 				{
-					a_vtable.write_vfunc(a_slot, chainAddress);
-					liveAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
+					rollbackWriteSucceeded = a_writeHook(chainAddress).succeeded;
+					liveAddress = *reinterpret_cast<const std::uintptr_t*>(a_slotAddress);
 				}
 
-				const bool rollbackVerified = rollbackAttempted && liveAddress == chainAddress;
+				const bool rollbackVerified = rollbackWriteSucceeded && liveAddress == chainAddress;
 				const bool hookStillDirectlyInstalled = liveAddress == a_hookAddress;
 				const bool hookMayRemainChained = !rollbackAttempted && liveAddress != chainAddress;
 				logger::error(
-					"{} verification failed: original matched={}, hook readback={}, "
+					"{} verification failed: write succeeded={}, original matched={}, hook readback={}, "
 					"rollback attempted={}, rollback verified={}, hook directly installed={}, "
 					"hook may remain chained={}.",
 					a_name,
+					result.succeeded,
 					originalMatched,
 					hookMatched,
 					rollbackAttempted,
@@ -263,16 +271,15 @@ namespace ToggleDialogueCameraSF::Input
 			return true;
 		}
 
-		template <class Function>
-		[[nodiscard]] bool RestoreVtableHook(
-			REL::Relocation<std::uintptr_t>& a_vtable,
-			const std::size_t a_slot,
+		template <class Function, class Writer>
+		[[nodiscard]] bool RestoreHook(
+			const std::uintptr_t a_slotAddress,
 			const std::uintptr_t a_hookAddress,
 			Function& a_original,
-			const std::string_view a_name)
+			const std::string_view a_name,
+			const Writer& a_writeHook)
 		{
-			const auto slotAddress = a_vtable.address() + sizeof(std::uintptr_t) * a_slot;
-			auto liveAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
+			auto liveAddress = *reinterpret_cast<const std::uintptr_t*>(a_slotAddress);
 			if (liveAddress != a_hookAddress)
 			{
 				logger::critical(
@@ -289,9 +296,9 @@ namespace ToggleDialogueCameraSF::Input
 				return false;
 			}
 
-			a_vtable.write_vfunc(a_slot, chainAddress);
-			liveAddress = *reinterpret_cast<const std::uintptr_t*>(slotAddress);
-			const bool restored = liveAddress == chainAddress;
+			const bool writeSucceeded = a_writeHook(chainAddress).succeeded;
+			liveAddress = *reinterpret_cast<const std::uintptr_t*>(a_slotAddress);
+			const bool restored = writeSucceeded && liveAddress == chainAddress;
 			if (restored)
 			{
 				a_original = nullptr;
@@ -310,14 +317,41 @@ namespace ToggleDialogueCameraSF::Input
 		REL::Relocation playerControlsInputVtable{
 			RE::VTABLE::PlayerControls__Manager[kPlayerControlsInputVtable]
 		};
+		const auto playerControlsVtableSlot =
+			playerControlsInputVtable.address() + sizeof(std::uintptr_t) * kPerformInputProcessingSlot;
+		auto playerControlsSlot = playerControlsVtableSlot;
+		const auto currentInput = *reinterpret_cast<const std::uintptr_t*>(playerControlsSlot);
+		if (!HasExpectedPrologue(currentInput, kExpectedPlayerControlsInputPrologue))
+		{
+			playerControlsSlot = DialogueMovementEnabler::GetInputChainSlot(currentInput);
+			if (playerControlsSlot == 0)
+			{
+				logger::error("PlayerControls input target was not recognized; the input hook was not installed.");
+				return false;
+			}
+		}
+
+		const auto writePlayerControlsHook = [&](const std::uintptr_t a_address)
+			-> HookWriteResult
+		{
+			if (playerControlsSlot == playerControlsVtableSlot)
+			{
+				return {playerControlsInputVtable.write_vfunc(kPerformInputProcessingSlot, a_address), true};
+			}
+			const auto previousAddress = *reinterpret_cast<const std::uintptr_t*>(playerControlsSlot);
+			return {previousAddress, REL::WriteSafeData(playerControlsSlot, a_address)};
+		};
+		const std::string_view playerControlsHookName = playerControlsSlot == playerControlsVtableSlot
+			? "PlayerControls::Manager PerformInputProcessing hook"
+			: "Dialogue Movement Enabler input chain hook";
 		const auto playerControlsHookAddress = REX::UNRESTRICTED_CAST<std::uintptr_t>(ProcessPlayerControlsInput);
-		if (!InstallVtableHook(
-			playerControlsInputVtable,
-			kPerformInputProcessingSlot,
+		if (!InstallHook(
+			playerControlsSlot,
 			playerControlsHookAddress,
 			kExpectedPlayerControlsInputPrologue,
 			originalPlayerControlsInput,
-			"PlayerControls::Manager PerformInputProcessing hook"))
+			playerControlsHookName,
+			writePlayerControlsHook))
 		{
 			return false;
 		}
@@ -327,20 +361,25 @@ namespace ToggleDialogueCameraSF::Input
 		};
 		const auto thirdPersonButtonHookAddress =
 			REX::UNRESTRICTED_CAST<std::uintptr_t>(ProcessThirdPersonButtonInput);
-		if (!InstallVtableHook(
-			thirdPersonStateVtable,
-			kOnButtonEventSlot,
+		const auto writeThirdPersonHook = [&](const std::uintptr_t a_address)
+			-> HookWriteResult
+		{
+			return {thirdPersonStateVtable.write_vfunc(kOnButtonEventSlot, a_address), true};
+		};
+		if (!InstallHook(
+			thirdPersonStateVtable.address() + sizeof(std::uintptr_t) * kOnButtonEventSlot,
 			thirdPersonButtonHookAddress,
 			kExpectedThirdPersonButtonPrologue,
 			originalThirdPersonButtonInput,
-			"ThirdPersonState OnButtonEvent hook"))
+			"ThirdPersonState OnButtonEvent hook",
+			writeThirdPersonHook))
 		{
-			if (!RestoreVtableHook(
-				playerControlsInputVtable,
-				kPerformInputProcessingSlot,
+			if (!RestoreHook(
+				playerControlsSlot,
 				playerControlsHookAddress,
 				originalPlayerControlsInput,
-				"PlayerControls::Manager PerformInputProcessing hook"))
+				playerControlsHookName,
+				writePlayerControlsHook))
 			{
 				logger::critical(
 					"PlayerControls input hook remained live after ThirdPersonState hook installation failed.");
