@@ -2,5 +2,11 @@
 
 namespace ToggleDialogueCameraSF::DialogueMovementEnabler
 {
-	[[nodiscard]] std::uintptr_t GetInputChainSlot(std::uintptr_t a_currentInputHook);
+	struct InputHook
+	{
+		std::uintptr_t chainSlot{0};
+		bool processCameraFirst{false};
+	};
+
+	[[nodiscard]] InputHook GetInputHook(std::uintptr_t a_currentInputHook);
 }
