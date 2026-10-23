@@ -21,6 +21,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		};
 
 		std::atomic_bool dialogueOpen{false};
+		std::atomic_bool dialogueViewChanged{false};
 		std::atomic_bool pauseMenuOpen{false};
 		std::atomic_bool dialogueCameraEnabledAtOpen{false};
 		std::atomic_bool dialogueCameraOverrideActive{false};
@@ -371,6 +372,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 					{
 						resumeAfterSave.store(ResumeView::kNone);
 						dialogueOpen.store(false);
+						dialogueViewChanged.store(false);
 						return RE::BSEventNotifyControl::kContinue;
 					}
 
@@ -380,6 +382,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 						pauseMenuOpen.store(false);
 						resumeAfterPause.store(ResumeView::kNone);
 						dialogueOpen.store(false);
+						dialogueViewChanged.store(false);
 						dialogueCameraEnabledAtOpen.store(false);
 					}
 
@@ -428,6 +431,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 				if (menuName == kMainMenuName && a_event.opening)
 				{
 					dialogueOpen.store(false);
+					dialogueViewChanged.store(false);
 					pauseMenuOpen.store(false);
 					resumeAfterSave.store(ResumeView::kNone);
 					resumeAfterPause.store(ResumeView::kNone);
@@ -484,6 +488,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 				if (a_event.opening && !RestoreDialogueCameraSetting("DialogueMenu opening"))
 				{
 					dialogueOpen.store(false);
+					dialogueViewChanged.store(false);
 					return RE::BSEventNotifyControl::kContinue;
 				}
 
@@ -491,6 +496,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 				if (!camera)
 				{
 					dialogueOpen.store(false);
+					dialogueViewChanged.store(false);
 					pauseMenuOpen.store(false);
 					resumeAfterSave.store(ResumeView::kNone);
 					resumeAfterPause.store(ResumeView::kNone);
@@ -513,6 +519,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
 				if (a_event.opening)
 				{
+					dialogueViewChanged.store(false);
 					pauseMenuOpen.store(false);
 					resumeAfterSave.store(ResumeView::kNone);
 					resumeAfterPause.store(ResumeView::kNone);
@@ -536,6 +543,15 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 						CameraStateName(*camera),
 						dialogueCameraSetting->GetBool(),
 						dialogueCameraOverrideActive.load());
+
+					if (dialogueViewChanged.exchange(false) &&
+						camera->QCameraEquals(RE::CameraState::kDialogue))
+					{
+						if (!camera->SetCameraRestoreState(RE::CameraState::kFirstPerson))
+						{
+							logger::error("Could not set the dialogue camera's return view to first person.");
+						}
+					}
 
 					if (!RestoreDialogueCameraSetting("DialogueMenu close"))
 					{
@@ -598,6 +614,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 				}
 				else
 				{
+					dialogueViewChanged.store(true);
 					logger::info("Disabled-mode mouse zoom-out selected near third person.");
 				}
 			}
@@ -632,6 +649,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 				}
 				else
 				{
+					dialogueViewChanged.store(true);
 					logger::info("Disabled-mode mouse zoom-in selected near third person.");
 				}
 			}
@@ -643,6 +661,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 			}
 			else
 			{
+				dialogueViewChanged.store(true);
 				logger::info("Disabled-mode mouse zoom-in selected first person.");
 			}
 		}
@@ -657,6 +676,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 			}
 			else
 			{
+				dialogueViewChanged.store(true);
 				logger::info("Disabled-mode mouse zoom-out selected far third person.");
 			}
 		}
@@ -693,12 +713,41 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		{
 			return true;
 		}
+		if ((a_zoomIn && farThirdPerson) || (!a_zoomIn && nearThirdPerson))
+		{
+			bool selected;
+			if (a_zoomIn)
+			{
+				selected = SelectNearThirdPerson(*thirdPersonState);
+			}
+			else
+			{
+				thirdPersonState->EnableCameraNearFarMode();
+				selected = IsFarThirdPerson(*thirdPersonState);
+			}
+
+			if (selected)
+			{
+				dialogueViewChanged.store(true);
+				logger::info("Mouse middle-distance zoom selected {}.", CameraStateName(*camera));
+			}
+			else
+			{
+				logger::error(
+					"Mouse middle-distance zoom failed: direction={}, camera={}, target zoom={}.",
+					a_zoomIn ? "in" : "out",
+					CameraStateName(*camera),
+					thirdPersonState->GetCameraTargetZoom());
+			}
+			return true;
+		}
 		if (a_zoomIn && dialogueCameraOverrideActive.load())
 		{
 			if (nearThirdPerson || camera->IsInFirstPerson())
 			{
 				if (EnterDialogueCamera(*camera, "mouse zoom-in boundary"))
 				{
+					dialogueViewChanged.store(true);
 					logger::info("Mouse zoom-in boundary selected dialogue camera.");
 				}
 				return true;
@@ -708,6 +757,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		{
 			if (ExitDialogueCameraToThirdPerson(*camera, "mouse zoom-out boundary"))
 			{
+				dialogueViewChanged.store(true);
 				logger::info("Mouse zoom-out boundary selected third person.");
 			}
 			return true;
@@ -894,6 +944,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 			target = "first person";
 		}
 
+		dialogueViewChanged.store(true);
 		logger::info(
 			"Dialogue toggle: before[first={}, third={}, dialogue={}], native setting={}, override={}, target={}, after={}.",
 			wasFirstPerson,

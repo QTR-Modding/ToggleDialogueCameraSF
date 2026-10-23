@@ -4,7 +4,7 @@ The distributed `ToggleDialogueCameraSF.dll` statically incorporates code from
 these exact revisions:
 
 - [CommonLibSF](https://github.com/QTR-Modding/commonlibsf) commit
-  `9fc64c0f987e8c1bdc1964bb1aa9dec4a4839061`
+  `6a3c3d85b19992a10b0fca473e97ae8ea06c50c3`
 - [commonlib-shared](https://github.com/libxse/commonlib-shared) commit
   `5470284e964d5510aa001dca3e0bb5548b6356a4`
 - [spdlog](https://github.com/gabime/spdlog) v1.16.0, commit
