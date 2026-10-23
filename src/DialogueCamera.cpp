@@ -545,10 +545,22 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 						dialogueCameraOverrideActive.load());
 
 					if (dialogueViewChanged.exchange(false) &&
-						camera->QCameraEquals(RE::CameraState::kDialogue) &&
-						!SelectFirstPerson(*camera, true))
+						camera->QCameraEquals(RE::CameraState::kDialogue))
 					{
-						logger::error("Could not select first person after the dialogue-camera view was used.");
+						const auto player = RE::PlayerCharacter::GetSingleton();
+						if (player)
+						{
+							player->StopDialogueCamera(false, true);
+							// The dialogue input layer can block the native stop's first-person selection.
+							if (camera->QCameraEquals(RE::CameraState::kDialogue))
+							{
+								camera->ForceFirstPerson();
+							}
+						}
+						if (!camera->IsInFirstPerson())
+						{
+							logger::error("Could not select first person after the dialogue-camera view was used.");
+						}
 					}
 
 					if (!RestoreDialogueCameraSetting("DialogueMenu close"))
