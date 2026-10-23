@@ -711,6 +711,34 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		{
 			return true;
 		}
+		if ((a_zoomIn && farThirdPerson) || (!a_zoomIn && nearThirdPerson))
+		{
+			bool selected;
+			if (a_zoomIn)
+			{
+				selected = SelectNearThirdPerson(*thirdPersonState);
+			}
+			else
+			{
+				thirdPersonState->EnableCameraNearFarMode();
+				selected = IsFarThirdPerson(*thirdPersonState);
+			}
+
+			if (selected)
+			{
+				dialogueViewChanged.store(true);
+				logger::info("Mouse middle-distance zoom selected {}.", CameraStateName(*camera));
+			}
+			else
+			{
+				logger::error(
+					"Mouse middle-distance zoom failed: direction={}, camera={}, target zoom={}.",
+					a_zoomIn ? "in" : "out",
+					CameraStateName(*camera),
+					thirdPersonState->GetCameraTargetZoom());
+			}
+			return true;
+		}
 		if (a_zoomIn && dialogueCameraOverrideActive.load())
 		{
 			if (nearThirdPerson || camera->IsInFirstPerson())
