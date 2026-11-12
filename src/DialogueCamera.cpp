@@ -39,7 +39,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
 		[[nodiscard]] bool SelectNearThirdPerson(RE::ThirdPersonState& a_state)
 		{
-			if (!minCurrentZoomSetting || !minCurrentZoomSetting->Is<float>())
+			if (!minCurrentZoomSetting || minCurrentZoomSetting->GetType() != RE::Setting::Type::kFloat)
 			{
 				logger::error("The native minimum third-person zoom setting is unavailable.");
 				return false;
@@ -54,7 +54,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
 			// Native wheel zoom selects the near stage by changing only this target;
 			// ThirdPersonState then performs the normal smooth interpolation.
-			a_state.cameraTargetZoom = targetZoom;
+			a_state.SetCameraTargetZoom(targetZoom);
 			return !IsFarThirdPerson(a_state);
 		}
 
@@ -82,7 +82,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 
 		[[nodiscard]] bool SetRuntimeDialogueCamera(const bool a_enabled)
 		{
-			if (!dialogueCameraSetting || !dialogueCameraSetting->Is<bool>())
+			if (!dialogueCameraSetting || dialogueCameraSetting->GetType() != RE::Setting::Type::kBool)
 			{
 				logger::error("The runtime Dialogue Camera setting is unavailable.");
 				return false;
@@ -979,7 +979,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		}
 
 		dialogueCameraSetting = RE::GetINISetting(kDialogueCameraSettingName);
-		if (!dialogueCameraSetting || !dialogueCameraSetting->Is<bool>())
+		if (!dialogueCameraSetting || dialogueCameraSetting->GetType() != RE::Setting::Type::kBool)
 		{
 			logger::error("Could not resolve {} as a Boolean INI preference.", kDialogueCameraSettingName);
 			dialogueCameraSetting = nullptr;
@@ -987,7 +987,7 @@ namespace ToggleDialogueCameraSF::DialogueCamera
 		}
 
 		minCurrentZoomSetting = RE::GetINISetting(kMinCurrentZoomSettingName);
-		if (!minCurrentZoomSetting || !minCurrentZoomSetting->Is<float>())
+		if (!minCurrentZoomSetting || minCurrentZoomSetting->GetType() != RE::Setting::Type::kFloat)
 		{
 			logger::error("Could not resolve {} as a floating-point camera setting.", kMinCurrentZoomSettingName);
 			minCurrentZoomSetting = nullptr;

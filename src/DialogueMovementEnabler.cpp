@@ -71,7 +71,7 @@ namespace ToggleDialogueCameraSF::DialogueMovementEnabler
 
 	InputHook GetInputHook(const std::uintptr_t a_currentInputHook)
 	{
-		const auto module = REX::FModule::GetLoadedModule("DialogueMovementEnabler.dll");
+		const auto module = REX::FModule::GetLoadedModule(L"DialogueMovementEnabler.dll");
 		const auto base = module.GetBaseAddress();
 		if (base == 0)
 		{
@@ -132,7 +132,7 @@ namespace ToggleDialogueCameraSF::DialogueMovementEnabler
 			}
 		}
 
-		if (*reinterpret_cast<const std::uintptr_t*>(slot) != REL::ID(82442).address())
+		if (*reinterpret_cast<const std::uintptr_t*>(slot) != SF1::ResolveID(82442))
 		{
 			logger::warn("Dialogue Movement Enabler input chain no longer points to vanilla PlayerControls.");
 			return {};
