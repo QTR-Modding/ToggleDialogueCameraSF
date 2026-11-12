@@ -34,6 +34,7 @@ add_rules("plugin.vsxmake.autoupdate")
 
 target(dll_name)
     set_kind("shared")
+    add_rules("sf1sdk.plugin")
     add_deps("SF1SDK")
     add_packages("spdlog")
     add_files("src/Version.rc")
