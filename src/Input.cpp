@@ -1,7 +1,8 @@
 #include "Input.h"
 #include "DialogueCamera.h"
 #include "DialogueMovementEnabler.h"
-#include "REX/W32/XINPUT.h"
+#include <Windows.h>
+#include <Xinput.h>
 
 namespace ToggleDialogueCameraSF::Input
 {
@@ -12,8 +13,6 @@ namespace ToggleDialogueCameraSF::Input
 
 		// PlayerControls::Manager is the first normal receiver on Starfield 1.16.244.
 		// Custom view inputs are consumed there before vanilla can claim them.
-		constexpr std::size_t kPlayerControlsInputVtable = 8;
-		constexpr std::size_t kThirdPersonStateVtable = 0;
 		constexpr std::size_t kPerformInputProcessingSlot = 1;
 		constexpr std::size_t kOnButtonEventSlot = 8;
 		constexpr std::size_t kMaximumQueueLength = 512;
@@ -77,7 +76,7 @@ namespace ToggleDialogueCameraSF::Input
 		{
 			// XInput's legacy BACK name is the Xbox View button (two overlapping rectangles).
 			return a_button.deviceType == RE::InputEvent::DeviceType::kGamepad &&
-				a_button.idCode == REX::W32::XINPUT_GAMEPAD_BACK;
+				a_button.idCode == XINPUT_GAMEPAD_BACK;
 		}
 
 		[[nodiscard]] bool ConsumeViewButton(
@@ -233,10 +232,10 @@ namespace ToggleDialogueCameraSF::Input
 			}
 
 			// Publish the chain target before making this hook reachable.
-			a_original = REX::UNRESTRICTED_CAST<Function>(originalAddress);
+			a_original = reinterpret_cast<Function>(originalAddress);
 			const auto result = a_writeHook(a_hookAddress);
 			const auto chainAddress = result.previousAddress != 0 ? result.previousAddress : originalAddress;
-			a_original = REX::UNRESTRICTED_CAST<Function>(chainAddress);
+			a_original = reinterpret_cast<Function>(chainAddress);
 
 			const bool originalMatched = result.previousAddress == originalAddress;
 			auto liveAddress = *reinterpret_cast<const std::uintptr_t*>(a_slotAddress);
@@ -291,7 +290,7 @@ namespace ToggleDialogueCameraSF::Input
 				return false;
 			}
 
-			const auto chainAddress = REX::UNRESTRICTED_CAST<std::uintptr_t>(a_original);
+			const auto chainAddress = reinterpret_cast<std::uintptr_t>(a_original);
 			if (chainAddress == 0)
 			{
 				logger::critical("{} rollback has no valid chain target while the hook is live.", a_name);
@@ -316,11 +315,8 @@ namespace ToggleDialogueCameraSF::Input
 
 	bool Install()
 	{
-		REL::Relocation playerControlsInputVtable{
-			RE::VTABLE::PlayerControls__Manager[kPlayerControlsInputVtable]
-		};
-		const auto playerControlsVtableSlot =
-			playerControlsInputVtable.address() + sizeof(std::uintptr_t) * kPerformInputProcessingSlot;
+		const auto playerControlsVtableSlot = RE::BSInputEventReceiver::GetPlayerControlsVTable() +
+			sizeof(std::uintptr_t) * kPerformInputProcessingSlot;
 		auto playerControlsSlot = playerControlsVtableSlot;
 		const auto currentInput = *reinterpret_cast<const std::uintptr_t*>(playerControlsSlot);
 		std::uintptr_t verifiedInputHook = 0;
@@ -351,10 +347,6 @@ namespace ToggleDialogueCameraSF::Input
 		const auto writePlayerControlsHook = [&](const std::uintptr_t a_address)
 			-> HookWriteResult
 		{
-			if (playerControlsSlot == playerControlsVtableSlot)
-			{
-				return {playerControlsInputVtable.write_vfunc(kPerformInputProcessingSlot, a_address), true};
-			}
 			const auto previousAddress = *reinterpret_cast<const std::uintptr_t*>(playerControlsSlot);
 			return {previousAddress, REL::WriteSafeData(playerControlsSlot, a_address)};
 		};
@@ -363,7 +355,7 @@ namespace ToggleDialogueCameraSF::Input
 			: playerControlsSlot == playerControlsVtableSlot
 				? "PlayerControls::Manager PerformInputProcessing hook"
 				: "Dialogue Movement Enabler input chain hook";
-		const auto playerControlsHookAddress = REX::UNRESTRICTED_CAST<std::uintptr_t>(ProcessPlayerControlsInput);
+		const auto playerControlsHookAddress = reinterpret_cast<std::uintptr_t>(&ProcessPlayerControlsInput);
 		if (!InstallHook(
 			playerControlsSlot,
 			playerControlsHookAddress,
@@ -376,18 +368,18 @@ namespace ToggleDialogueCameraSF::Input
 			return false;
 		}
 
-		REL::Relocation thirdPersonStateVtable{
-			RE::VTABLE::ThirdPersonState[kThirdPersonStateVtable]
-		};
+		const auto thirdPersonSlot = RE::ThirdPersonState::GetVTable() +
+			sizeof(std::uintptr_t) * kOnButtonEventSlot;
 		const auto thirdPersonButtonHookAddress =
-			REX::UNRESTRICTED_CAST<std::uintptr_t>(ProcessThirdPersonButtonInput);
+			reinterpret_cast<std::uintptr_t>(&ProcessThirdPersonButtonInput);
 		const auto writeThirdPersonHook = [&](const std::uintptr_t a_address)
 			-> HookWriteResult
 		{
-			return {thirdPersonStateVtable.write_vfunc(kOnButtonEventSlot, a_address), true};
+			const auto previousAddress = *reinterpret_cast<const std::uintptr_t*>(thirdPersonSlot);
+			return {previousAddress, REL::WriteSafeData(thirdPersonSlot, a_address)};
 		};
 		if (!InstallHook(
-			thirdPersonStateVtable.address() + sizeof(std::uintptr_t) * kOnButtonEventSlot,
+			thirdPersonSlot,
 			thirdPersonButtonHookAddress,
 			kExpectedThirdPersonButtonPrologue,
 			originalThirdPersonButtonInput,
